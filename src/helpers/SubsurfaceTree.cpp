@@ -101,14 +101,6 @@ void SubsurfaceTree::destroySurfaceTree(SSurfaceTreeNode* pNode) {
         g_pHyprRenderer->damageBox(&extents);
     }
 
-    // remove references to this node
-    for (auto& tn : surfaceTreeNodes) {
-        for (auto& cs : tn.childSubsurfaces) {
-            if (cs.pChild == pNode)
-                cs.pChild = nullptr;
-        }
-    }
-
     surfaceTreeNodes.remove(*pNode);
 
     Debug::log(LOG, "SurfaceTree Node removed");
@@ -123,10 +115,6 @@ void destroySubsurface(SSubsurface* pSubsurface) {
     pSubsurface->hyprListener_destroy.removeCallback();
     pSubsurface->hyprListener_map.removeCallback();
     pSubsurface->hyprListener_unmap.removeCallback();
-
-    if (pSubsurface->pParent) {
-        pSubsurface->pParent->childSubsurfaces.remove(*pSubsurface);
-    }
 }
 
 //
