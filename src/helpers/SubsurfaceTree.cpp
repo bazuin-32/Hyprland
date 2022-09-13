@@ -123,6 +123,10 @@ void destroySubsurface(SSubsurface* pSubsurface) {
     pSubsurface->hyprListener_destroy.removeCallback();
     pSubsurface->hyprListener_map.removeCallback();
     pSubsurface->hyprListener_unmap.removeCallback();
+
+    if (pSubsurface->pParent) {
+        pSubsurface->pParent->childSubsurfaces.remove(*pSubsurface);
+    }
 }
 
 //
@@ -161,6 +165,9 @@ void Events::listener_newSubsurfaceNode(void* owner, void* data) {
 
 void Events::listener_mapSubsurface(void* owner, void* data) {
     SSubsurface* subsurface = (SSubsurface*)owner;
+
+    if (subsurface->pChild)
+        return;
 
     Debug::log(LOG, "Subsurface %x mapped", subsurface->pSubsurface);
 
