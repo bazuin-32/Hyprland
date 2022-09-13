@@ -104,6 +104,14 @@ void SubsurfaceTree::destroySurfaceTree(SSurfaceTreeNode* pNode) {
         g_pHyprRenderer->damageBox(&extents);
     }
 
+    // remove references to this node
+    if (pNode->pParent) {
+        for (auto& cs : pNode->pParent->childSubsurfaces) {
+            if (cs.pChild == pNode)
+                cs.pChild = nullptr;
+        }
+    }
+
     surfaceTreeNodes.remove(*pNode);
 
     Debug::log(LOG, "SurfaceTree Node removed");
