@@ -189,8 +189,8 @@ void Events::listener_unmapSubsurface(void* owner, void* data) {
             g_pHyprRenderer->damageBox(&extents);
         }
 
-        SubsurfaceTree::destroySurfaceTree(subsurface->pChild);
-        subsurface->pChild = nullptr;
+        //SubsurfaceTree::destroySurfaceTree(subsurface->pChild);
+        //subsurface->pChild = nullptr;
     }
 }
 
@@ -226,8 +226,9 @@ void Events::listener_commitSubsurface(void* owner, void* data) {
 void Events::listener_destroySubsurface(void* owner, void* data) {
     SSubsurface* subsurface = (SSubsurface*)owner;
 
-    if (subsurface->pChild)
-        listener_destroySubsurfaceNode(subsurface->pChild, nullptr);
+    if (subsurface->pChild) {
+        SubsurfaceTree::destroySurfaceTree(subsurface->pChild);
+    }
 
     Debug::log(LOG, "Subsurface %x destroyed", subsurface);
 
