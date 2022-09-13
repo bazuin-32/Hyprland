@@ -3,9 +3,6 @@
 #include "../Compositor.hpp"
 
 void addSurfaceGlobalOffset(SSurfaceTreeNode* node, int* lx, int* ly) {
-    if (!node->pSurface)
-        return; // ? how does this happen sometimes
-
     *lx += node->pSurface->sx;
     *ly += node->pSurface->sy;
 
@@ -105,8 +102,8 @@ void SubsurfaceTree::destroySurfaceTree(SSurfaceTreeNode* pNode) {
     }
 
     // remove references to this node
-    if (pNode->pParent) {
-        for (auto& cs : pNode->pParent->childSubsurfaces) {
+    for (auto& tn : surfaceTreeNodes) {
+        for (auto& cs : tn.childSubsurfaces) {
             if (cs.pChild == pNode)
                 cs.pChild = nullptr;
         }
