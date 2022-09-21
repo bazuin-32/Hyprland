@@ -12,6 +12,12 @@ enum eClickBehaviorMode {
     CLICKMODE_KILL
 };
 
+enum eMouseBindMode {
+    MBIND_INVALID = -1,
+    MBIND_MOVE = 0,
+    MBIND_RESIZE
+};
+
 struct STouchData {
     CWindow* touchFocusWindow = nullptr;
     Vector2D touchSurfaceOrigin;
@@ -30,6 +36,8 @@ public:
     void            newKeyboard(wlr_input_device*);
     void            newVirtualKeyboard(wlr_input_device*);
     void            newMouse(wlr_input_device*, bool virt = false);
+    void            newTouchDevice(wlr_input_device*);
+    void            destroyTouchDevice(STouchDevice*);
     void            destroyKeyboard(SKeyboard*);
     void            destroyMouse(wlr_input_device*);
 
@@ -59,7 +67,7 @@ public:
 
     // for dragging floating windows
     CWindow*        currentlyDraggedWindow = nullptr;
-    int             dragButton = -1;
+    eMouseBindMode  dragMode = MBIND_INVALID;
 
     SDrag           m_sDrag;
 
@@ -74,6 +82,9 @@ public:
 
     // idle inhibitors
     std::list<SIdleInhibitor> m_lIdleInhibitors;
+
+    // Touch devices
+    std::list<STouchDevice> m_lTouchDevices;
 
     void            newTabletTool(wlr_input_device*);
     void            newTabletPad(wlr_input_device*);

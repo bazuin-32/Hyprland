@@ -344,8 +344,7 @@ void Events::listener_mapWindow(void* owner, void* data) {
         // fix fullscreen on requested (basically do a switcheroo)
         if (PWORKSPACE->m_bHasFullscreenWindow) {
             const auto PFULLWINDOW = g_pCompositor->getFullscreenWindowOnWorkspace(PWORKSPACE->m_iID);
-            g_pLayoutManager->getCurrentLayout()->fullscreenRequestForWindow(PFULLWINDOW, FULLSCREEN_FULL, false);
-            g_pXWaylandManager->setWindowFullscreen(PFULLWINDOW, PFULLWINDOW->m_bIsFullscreen);
+            g_pCompositor->setWindowFullscreen(PFULLWINDOW, false, FULLSCREEN_FULL);
         }
 
         PWINDOW->m_vRealPosition.warp();
@@ -406,9 +405,7 @@ void Events::listener_unmapWindow(void* owner, void* data) {
     }
 
     if (PWINDOW->m_bIsFullscreen) {
-        g_pLayoutManager->getCurrentLayout()->fullscreenRequestForWindow(PWINDOW, FULLSCREEN_FULL, false);
-        g_pXWaylandManager->setWindowFullscreen(PWINDOW, PWINDOW->m_bIsFullscreen);
-        g_pCompositor->forceReportSizesToWindowsOnWorkspace(PWINDOW->m_iWorkspaceID);
+        g_pCompositor->setWindowFullscreen(PWINDOW, false, FULLSCREEN_FULL);
     }
 
     // Allow the renderer to catch the last frame.

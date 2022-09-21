@@ -327,6 +327,13 @@ void CHyprDwindleLayout::onWindowCreatedTiling(CWindow* pWindow) {
         return;
     }
 
+    const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(pWindow->m_iWorkspaceID);
+
+    if (PWORKSPACE->m_bHasFullscreenWindow) {
+        const auto PFULLWINDOW = g_pCompositor->getFullscreenWindowOnWorkspace(PWORKSPACE->m_iID);
+        g_pCompositor->setWindowFullscreen(PFULLWINDOW, false, FULLSCREEN_FULL);
+    }
+
     // if it's the first, it's easy. Make it fullscreen.
     if (!OPENINGON || OPENINGON->pWindow == pWindow) {
         PNODE->position = PMONITOR->vecPosition + PMONITOR->vecReservedTopLeft;
@@ -447,6 +454,9 @@ void CHyprDwindleLayout::onWindowRemovedTiling(CWindow* pWindow) {
         Debug::log(ERR, "onWindowRemovedTiling node null?");
         return;
     }
+
+    if (pWindow->m_bIsFullscreen)
+        g_pCompositor->setWindowFullscreen(pWindow, false, FULLSCREEN_FULL);
 
     // check if it was grouped
     if (PNODE->isGroupMember()) {
@@ -682,10 +692,7 @@ void CHyprDwindleLayout::fullscreenRequestForWindow(CWindow* pWindow, eFullscree
     if (!g_pCompositor->windowValidMapped(pWindow))
         return;
 
-    if (!g_pCompositor->isWorkspaceVisible(pWindow->m_iWorkspaceID))
-        return;
-
-    if (on == pWindow->m_bIsFullscreen)
+    if (on == pWindow->m_bIsFullscreen || pWindow->m_iWorkspaceID == SPECIAL_WORKSPACE_ID)
         return; // ignore
 
     const auto PMONITOR = g_pCompositor->getMonitorFromID(pWindow->m_iMonitorID);
@@ -785,12 +792,13 @@ void CHyprDwindleLayout::toggleWindowGroup(CWindow* pWindow) {
 
     const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(PNODE->workspaceID);
 
-    if (PWORKSPACE->m_bHasFullscreenWindow)
-        fullscreenRequestForWindow(g_pCompositor->getFullscreenWindowOnWorkspace(PWORKSPACE->m_iID), FULLSCREEN_FULL, false);
+    if (PWORKSPACE->m_bHasFullscreenWindow && !PNODE->isGroupMember()) {
+        Debug::log(ERR, "Cannot enable group on fullscreen window");
+        return;
+    }
 
     if (PNODE->isGroupMember()) {
         // dissolve group
-
         const auto PHEAD = PNODE->getGroupHead();
 
         SDwindleNodeData* current = PNODE->pNextGroupMember;
@@ -928,7 +936,7 @@ std::deque<CWindow*> CHyprDwindleLayout::getGroupMembers(CWindow* pWindow) {
     return result;
 }
 
-void CHyprDwindleLayout::switchGroupWindow(CWindow* pWindow, bool forward) {
+void CHyprDwindleLayout::switchGroupWindow(CWindow* pWindow, bool forward, CWindow* forceTo) {
     if (!g_pCompositor->windowValidMapped(pWindow))
         return; // reject
 
@@ -946,10 +954,18 @@ void CHyprDwindleLayout::switchGroupWindow(CWindow* pWindow, bool forward) {
     else
         pNewNode = PNODE->pPreviousGroupMember;
 
+    if (forceTo) {
+        const auto NODETO = getNodeFromWindow(forceTo);
+
+        if (NODETO)
+            pNewNode = NODETO;
+    }
+
     PNODE->setGroupFocusedNode(pNewNode);
 
     pNewNode->position = PNODE->position;
     pNewNode->size = PNODE->size;
+    pNewNode->workspaceID = PNODE->workspaceID;
 
     applyNodeDataToWindow(pNewNode);
 
@@ -1001,58 +1017,101 @@ SWindowRenderLayoutHints CHyprDwindleLayout::requestRenderHints(CWindow* pWindow
 void CHyprDwindleLayout::switchWindows(CWindow* pWindow, CWindow* pWindow2) {
     // windows should be valid, insallah
 
-    const auto PNODE = getNodeFromWindow(pWindow);
-    const auto PNODE2 = getNodeFromWindow(pWindow2);
+    auto PNODE = getNodeFromWindow(pWindow);
+    auto PNODE2 = getNodeFromWindow(pWindow2);
 
-    if (!PNODE2 || !PNODE)
-        return;
+    if (!PNODE2 || !PNODE) {
+		return;
+	}
 
-    if (PNODE->workspaceID != PNODE2->workspaceID) {
-        Debug::log(ERR, "Dwindle: Rejecting a swap between workspaces");
-        return;
-    }
+    SDwindleNodeData* ACTIVE1 = nullptr;
+	SDwindleNodeData* ACTIVE2 = nullptr;
 
-    // we will not delete the nodes, just fix the tree
-    if (PNODE2->pParent == PNODE->pParent) {
-        const auto PPARENT = PNODE->pParent;
+	if (PNODE2->isGroupMember() || PNODE->isGroupMember()) {
 
-        if (PPARENT->children[0] == PNODE) {
-            PPARENT->children[0] = PNODE2;
-            PPARENT->children[1] = PNODE;
-        } else {
-            PPARENT->children[0] = PNODE;
-            PPARENT->children[1] = PNODE2;
-        }
-    } else {
-        if (PNODE->pParent) {
-            const auto PPARENT = PNODE->pParent;
-
-            if (PPARENT->children[0] == PNODE) {
-                PPARENT->children[0] = PNODE2;
-            } else {
-                PPARENT->children[1] = PNODE2;
-            }
+        if (PNODE->workspaceID != PNODE2->workspaceID) {
+            Debug::log(ERR, "Groups are confined to a monitor");
+            return;
         }
 
-        if (PNODE2->pParent) {
-            const auto PPARENT = PNODE2->pParent;
+        if (PNODE->isGroupMember()) {
+            ACTIVE1 = PNODE;
+            PNODE = PNODE->getGroupHead();
+		}
 
-            if (PPARENT->children[0] == PNODE2) {
-                PPARENT->children[0] = PNODE;
-            } else {
-                PPARENT->children[1] = PNODE;
-            }
-        }
-    }
+		if (PNODE2->isGroupMember()) {
+            ACTIVE2 = PNODE2;
+			PNODE2 = PNODE2->getGroupHead();
+		}
 
-    const auto PPARENTNODE2 = PNODE2->pParent;
-    PNODE2->pParent = PNODE->pParent;
-    PNODE->pParent = PPARENTNODE2;
+		if (PNODE2->pParent == PNODE->pParent) {
+			const auto PPARENT = PNODE->pParent;
 
-    // these are window nodes, so no children.
+			if (PPARENT->children[0] == PNODE) {
+				PPARENT->children[0] = PNODE2;
+				PPARENT->children[1] = PNODE;
+			} else {
+				PPARENT->children[0] = PNODE;
+				PPARENT->children[1] = PNODE2;
+			}
+		} else {
+			if (PNODE->pParent) {
+				const auto PPARENT = PNODE->pParent;
 
-    // recalc the workspace
+				if (PPARENT->children[0] == PNODE) {
+					PPARENT->children[0] = PNODE2;
+				} else {
+					PPARENT->children[1] = PNODE2;
+				}
+			}
+
+			if (PNODE2->pParent) {
+				const auto PPARENT = PNODE2->pParent;
+
+				if (PPARENT->children[0] == PNODE2) {
+					PPARENT->children[0] = PNODE;
+				} else {
+					PPARENT->children[1] = PNODE;
+				}
+			}
+		}
+
+		const auto PPARENTNODE2 = PNODE2->pParent;
+		PNODE2->pParent = PNODE->pParent;
+		PNODE->pParent = PPARENTNODE2;
+
+		std::swap(PNODE2->workspaceID, PNODE->workspaceID);
+	} else {
+		// swap the windows and recalc
+		PNODE2->pWindow = pWindow;
+		PNODE->pWindow = pWindow2;
+	}
+
+	if (PNODE->workspaceID != PNODE2->workspaceID) {
+		std::swap(pWindow2->m_iMonitorID, pWindow->m_iMonitorID);
+		std::swap(pWindow2->m_iWorkspaceID, pWindow->m_iWorkspaceID);
+	}
+
+	// recalc the workspace
     getMasterNodeOnWorkspace(PNODE->workspaceID)->recalcSizePosRecursive();
+    
+    if (PNODE2->workspaceID != PNODE->workspaceID) {
+        getMasterNodeOnWorkspace(PNODE2->workspaceID)->recalcSizePosRecursive();
+    }
+
+	if (ACTIVE1) {
+		ACTIVE1->position = PNODE->position;
+		ACTIVE1->size = PNODE->size;
+		ACTIVE1->pWindow->m_vPosition = ACTIVE1->position;
+		ACTIVE1->pWindow->m_vSize = ACTIVE1->size;
+	}
+
+	if (ACTIVE2) {
+		ACTIVE2->position = PNODE2->position;
+		ACTIVE2->size = PNODE2->size;
+		ACTIVE2->pWindow->m_vPosition = ACTIVE2->position;
+		ACTIVE2->pWindow->m_vSize = ACTIVE2->size;
+	}
 }
 
 void CHyprDwindleLayout::alterSplitRatioBy(CWindow* pWindow, float ratio) {
@@ -1078,7 +1137,7 @@ std::any CHyprDwindleLayout::layoutMessage(SLayoutMessageHeader header, std::str
     else if (message == "togglesplit")
         toggleSplit(header.pWindow);
     else if (message == "groupinfo") {
-        auto res = getGroupMembers(g_pCompositor->m_pLastWindow);
+        auto res = getGroupMembers(header.pWindow ? header.pWindow : g_pCompositor->m_pLastWindow);
         return res;
     }
     

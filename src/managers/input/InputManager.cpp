@@ -139,6 +139,9 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
     if (!foundSurface)
         foundSurface = g_pCompositor->vectorToLayerSurface(mouseCoords, &PMONITOR->m_aLayerSurfaceLists[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY], &surfaceCoords, &pFoundLayerSurface);
 
+    if (!foundSurface)
+        foundSurface = g_pCompositor->vectorToLayerSurface(mouseCoords, &PMONITOR->m_aLayerSurfaceLists[ZWLR_LAYER_SHELL_V1_LAYER_TOP], &surfaceCoords, &pFoundLayerSurface);
+
     // then, we check if the workspace doesnt have a fullscreen window
     const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(PMONITOR->activeWorkspace);
     if (PWORKSPACE->m_bHasFullscreenWindow && !foundSurface && PWORKSPACE->m_efFullscreenMode == FULLSCREEN_FULL) {
@@ -171,9 +174,6 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
             }
         }
     }
-
-    if (!foundSurface)
-        foundSurface = g_pCompositor->vectorToLayerSurface(mouseCoords, &PMONITOR->m_aLayerSurfaceLists[ZWLR_LAYER_SHELL_V1_LAYER_TOP], &surfaceCoords, &pFoundLayerSurface);
 
     // then windows
     if (!foundSurface) {
@@ -286,7 +286,9 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
                 wlr_seat_pointer_notify_enter(g_pCompositor->m_sSeat.seat, foundSurface, surfaceLocal.x, surfaceLocal.y);
             }
 
-            wlr_seat_pointer_notify_motion(g_pCompositor->m_sSeat.seat, time, surfaceLocal.x, surfaceLocal.y);
+            if (*PFOLLOWMOUSE != 0 || pFoundWindow == g_pCompositor->m_pLastWindow)
+                wlr_seat_pointer_notify_motion(g_pCompositor->m_sSeat.seat, time, surfaceLocal.x, surfaceLocal.y);
+                
             m_bLastFocusOnLS = false;
             return;  // don't enter any new surfaces
         } else {
@@ -383,7 +385,6 @@ void CInputManager::processMouseDownNormal(wlr_pointer_button_event* e) {
 
     // notify the keybind manager
     static auto *const PPASSMOUSE = &g_pConfigManager->getConfigValuePtr("binds:pass_mouse_when_bound")->intValue;
-    static auto *const PMAINMODINTERNAL = &g_pConfigManager->getConfigValuePtr("general:main_mod_internal")->intValue;
     const auto PASS = g_pKeybindManager->onMouseEvent(e);
 
     if (!PASS && !*PPASSMOUSE)
@@ -398,22 +399,8 @@ void CInputManager::processMouseDownNormal(wlr_pointer_button_event* e) {
             if (g_pCompositor->windowValidMapped(g_pCompositor->m_pLastWindow) && g_pCompositor->m_pLastWindow->m_bIsFloating)
                 g_pCompositor->moveWindowToTop(g_pCompositor->m_pLastWindow);
 
-            if ((e->button == BTN_LEFT || e->button == BTN_RIGHT) && wlr_keyboard_get_modifiers(PKEYBOARD) == (uint32_t)*PMAINMODINTERNAL) {
-                currentlyDraggedWindow = g_pCompositor->windowFromCursor();
-                dragButton = e->button;
-
-                g_pLayoutManager->getCurrentLayout()->onBeginDragWindow();
-
-                return;
-            }
             break;
         case WLR_BUTTON_RELEASED:
-            if (currentlyDraggedWindow) {
-                g_pLayoutManager->getCurrentLayout()->onEndDragWindow();
-                currentlyDraggedWindow = nullptr;
-                dragButton = -1;
-            }
-
             break;
     }
 
@@ -999,4 +986,23 @@ void CInputManager::disableAllKeyboards(bool virt) {
 
         k.active = false;
     }
+}
+
+void CInputManager::newTouchDevice(wlr_input_device* pDevice) {
+    const auto PNEWDEV = &m_lTouchDevices.emplace_back();
+    PNEWDEV->pWlrDevice = pDevice;
+
+    wlr_cursor_attach_input_device(g_pCompositor->m_sWLRCursor, pDevice);
+
+    Debug::log(LOG, "New touch device added at %x", PNEWDEV);
+
+    PNEWDEV->hyprListener_destroy.initCallback(&pDevice->events.destroy, [&](void* owner, void* data) {
+        destroyTouchDevice((STouchDevice*)data);
+    }, PNEWDEV, "TouchDevice");
+}
+
+void CInputManager::destroyTouchDevice(STouchDevice* pDevice) {
+    Debug::log(LOG, "Touch device at %x removed", pDevice);
+
+    m_lTouchDevices.remove(*pDevice);
 }

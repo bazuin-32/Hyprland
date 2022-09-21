@@ -122,11 +122,39 @@ bool CHyprRenderer::shouldRenderWindow(CWindow* pWindow) {
 void CHyprRenderer::renderWorkspaceWithFullscreenWindow(CMonitor* pMonitor, CWorkspace* pWorkspace, timespec* time) {
     CWindow* pWorkspaceWindow = nullptr;
 
+    // loop over the tiled windows that are fading out
+    for (auto& w : g_pCompositor->m_vWindows) {
+        if (w->m_iWorkspaceID != pMonitor->activeWorkspace)
+            continue;
+
+        if (w->m_fAlpha.fl() == 0.f)
+            continue;
+
+        if (w->m_bIsFullscreen || w->m_bIsFloating)
+            continue;
+
+        renderWindow(w.get(), pMonitor, time, true, RENDER_PASS_ALL);
+    }
+
+    // and floating ones too
+    for (auto& w : g_pCompositor->m_vWindows) {
+        if (w->m_iWorkspaceID != pMonitor->activeWorkspace)
+            continue;
+
+        if (w->m_fAlpha.fl() == 0.f)
+            continue;
+
+        if (w->m_bIsFullscreen || !w->m_bIsFloating)
+            continue;
+
+        renderWindow(w.get(), pMonitor, time, true, RENDER_PASS_ALL);
+    }
+
     for (auto& w : g_pCompositor->m_vWindows) {
         const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID);
 
         if (w->m_iWorkspaceID != pWorkspace->m_iID || !w->m_bIsFullscreen){
-            if (!(PWORKSPACE && (PWORKSPACE->m_vRenderOffset.isBeingAnimated() || PWORKSPACE->m_fAlpha.isBeingAnimated())))
+            if (!(PWORKSPACE && (PWORKSPACE->m_vRenderOffset.isBeingAnimated() || PWORKSPACE->m_fAlpha.isBeingAnimated() || PWORKSPACE->m_bForceRendering)))
                 continue;
 
             if (w->m_iMonitorID != pMonitor->ID)
@@ -141,7 +169,7 @@ void CHyprRenderer::renderWorkspaceWithFullscreenWindow(CMonitor* pMonitor, CWor
         pWorkspaceWindow = w.get();
     }
 
-    // then render windows over fullscreen
+    // then render windows over fullscreen.
     for (auto& w : g_pCompositor->m_vWindows) {
         if (w->m_iWorkspaceID != pWorkspaceWindow->m_iWorkspaceID || (!w->m_bCreatedOverFullscreen && !w->m_bPinned) || !w->m_bIsMapped)
             continue;
@@ -165,12 +193,11 @@ void CHyprRenderer::renderWorkspaceWithFullscreenWindow(CMonitor* pMonitor, CWor
     }
 
     // and the overlay layers
-    if (pWorkspace->m_efFullscreenMode != FULLSCREEN_FULL) {
-        // on non-full we draw the bar and shit
-        for (auto& ls : pMonitor->m_aLayerSurfaceLists[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
+    for (auto& ls : pMonitor->m_aLayerSurfaceLists[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
+        if (ls->alpha.fl() != 0.f)
             renderLayer(ls.get(), pMonitor, time);
-        }
     }
+
 
     for (auto& ls : pMonitor->m_aLayerSurfaceLists[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]) {
         renderLayer(ls.get(), pMonitor, time);

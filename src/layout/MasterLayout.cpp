@@ -84,6 +84,13 @@ void CHyprMasterLayout::onWindowCreatedTiling(CWindow* pWindow) {
         }
     }
 
+    const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(pWindow->m_iWorkspaceID);
+
+    if (PWORKSPACE->m_bHasFullscreenWindow) {
+        const auto PFULLWINDOW = g_pCompositor->getFullscreenWindowOnWorkspace(PWORKSPACE->m_iID);
+        g_pCompositor->setWindowFullscreen(PFULLWINDOW, false, FULLSCREEN_FULL);
+    }
+
     // recalc
     recalculateMonitor(pWindow->m_iMonitorID);
 }
@@ -93,6 +100,9 @@ void CHyprMasterLayout::onWindowRemovedTiling(CWindow* pWindow) {
 
     if (!PNODE)
         return;
+
+    if (pWindow->m_bIsFullscreen)
+        g_pCompositor->setWindowFullscreen(pWindow, false, FULLSCREEN_FULL);
 
     if (PNODE->isMaster) {
         // find new one
@@ -326,10 +336,7 @@ void CHyprMasterLayout::fullscreenRequestForWindow(CWindow* pWindow, eFullscreen
     if (!g_pCompositor->windowValidMapped(pWindow))
         return;
 
-    if (!g_pCompositor->isWorkspaceVisible(pWindow->m_iWorkspaceID))
-        return;
-
-    if (on == pWindow->m_bIsFullscreen)
+    if (on == pWindow->m_bIsFullscreen || pWindow->m_iWorkspaceID == SPECIAL_WORKSPACE_ID)
         return;  // ignore
 
     const auto PMONITOR = g_pCompositor->getMonitorFromID(pWindow->m_iMonitorID);
@@ -425,16 +432,17 @@ void CHyprMasterLayout::switchWindows(CWindow* pWindow, CWindow* pWindow2) {
         return;
 
     if (PNODE->workspaceID != PNODE2->workspaceID) {
-        Debug::log(ERR, "Master: Rejecting a swap between workspaces");
-        return;
+        std::swap(pWindow2->m_iMonitorID, pWindow->m_iMonitorID);
+        std::swap(pWindow2->m_iWorkspaceID, pWindow->m_iWorkspaceID);
     }
 
     // massive hack: just swap window pointers, lol
-    const auto PWINDOW1 = PNODE->pWindow;
-    PNODE->pWindow = PNODE2->pWindow;
-    PNODE2->pWindow = PWINDOW1;
+    PNODE->pWindow = pWindow2;
+    PNODE2->pWindow = pWindow;
 
-    recalculateMonitor(PWINDOW1->m_iMonitorID);
+    recalculateMonitor(pWindow->m_iMonitorID);
+    if (PNODE2->workspaceID != PNODE->workspaceID)
+        recalculateMonitor(pWindow2->m_iMonitorID);
 }
 
 void CHyprMasterLayout::alterSplitRatioBy(CWindow* pWindow, float ratio) {

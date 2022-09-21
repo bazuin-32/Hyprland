@@ -18,6 +18,7 @@ struct SKeybind {
     std::string       submap = "";
     bool              release = false;
     bool              repeat = false;
+    bool              mouse = false;
 
     // DO NOT INITIALIZE
     bool              shadowed = false;
@@ -63,6 +64,8 @@ private:
     uint32_t            m_uLastCode = 0;
     uint32_t            m_uLastMouseCode = 0;
 
+    bool                m_bIsMouseBindActive = false;
+
     int                 m_iPassPressed = -1; // used for pass
 
     CTimer              m_tScrollTimer;
@@ -75,6 +78,7 @@ private:
     xkb_state*          m_pXKBTranslationState = nullptr;
 
     void                updateXKBTranslationState();
+    bool                ensureMouseBindState();
 
     // -------------- Dispatchers -------------- //
     static void         killActive(std::string);
@@ -114,6 +118,7 @@ private:
     static void         swapnext(std::string);
     static void         swapActiveWorkspaces(std::string);
     static void         pinActive(std::string);
+    static void         mouse(std::string);
 
     friend class CCompositor;
     friend class CInputManager;
