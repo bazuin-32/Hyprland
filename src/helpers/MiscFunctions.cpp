@@ -65,7 +65,7 @@ std::string absolutePath(const std::string& rawpath, const std::string& currentP
 void addWLSignal(wl_signal* pSignal, wl_listener* pListener, void* pOwner, std::string ownerString) {
     ASSERT(pSignal);
     ASSERT(pListener);
-    
+
     wl_signal_add(pSignal, pListener);
 
     Debug::log(LOG, "Registered signal for owner %x: %x -> %x (owner: %s)", pOwner, pSignal, pListener, ownerString.c_str());
@@ -170,7 +170,28 @@ float getPlusMinusKeywordResult(std::string source, float relative) {
 }
 
 bool isNumber(const std::string& str, bool allowfloat) {
-    return std::ranges::all_of(str.begin(), str.end(), [&](char c) { return isdigit(c) != 0 || c == '-' || (allowfloat && c == '.'); });
+
+    std::string copy = str;
+    if (*copy.begin() == '-')
+        copy = copy.substr(1);
+    
+    if (copy.empty())
+        return false;
+
+    bool point = !allowfloat;
+    for (auto& c : copy) {
+        if (c == '.') {
+            if (point)
+                return false;
+            point = true;
+            break;
+        }
+
+        if (!std::isdigit(c))
+            return false;
+    }
+
+    return true;
 }
 
 bool isDirection(const std::string& arg) {
@@ -192,7 +213,7 @@ int getWorkspaceIDFromString(const std::string& in, std::string& outName) {
         }
         outName = WORKSPACENAME;
     } else {
-        if (in[0] == 'm' || in[0] == 'e') {
+        if ((in[0] == 'm' || in[0] == 'e') && (in[1] == '-' || in[1] == '+') && isNumber(in.substr(2))) {
             bool onAllMonitors = in[0] == 'e';
 
             if (!g_pCompositor->m_pLastMonitor) {
@@ -212,9 +233,9 @@ int getWorkspaceIDFromString(const std::string& in, std::string& outName) {
             while (remains != 0) {
                 if (remains < 0)
                     searchID--;
-                else 
+                else
                     searchID++;
-                
+
                 if (g_pCompositor->workspaceIDOutOfBounds(searchID)){
                     // means we need to wrap around
                     int lowestID = 99999;
@@ -233,7 +254,7 @@ int getWorkspaceIDFromString(const std::string& in, std::string& outName) {
 
                     if (remains < 0)
                         searchID = highestID;
-                    else 
+                    else
                         searchID = lowestID;
                 }
 
@@ -253,24 +274,32 @@ int getWorkspaceIDFromString(const std::string& in, std::string& outName) {
             outName = g_pCompositor->getWorkspaceByID(currentID)->m_szName;
 
         } else {
-            if (g_pCompositor->m_pLastMonitor)
-                result = std::clamp((int)getPlusMinusKeywordResult(in, g_pCompositor->m_pLastMonitor->activeWorkspace), 1, INT_MAX);
-            else if (isNumber(in))
-                result = std::clamp(std::stoi(in), 1, INT_MAX);
+            if (in[0] == '+' || in[0] == '-') {
+                if (g_pCompositor->m_pLastMonitor)
+                    result = std::max((int)getPlusMinusKeywordResult(in, g_pCompositor->m_pLastMonitor->activeWorkspace), 1);
+                else {
+                    Debug::log(ERR, "Relative workspace on no mon!");
+                    result = INT_MAX;
+                }
+            } else if (isNumber(in))
+                result = std::max(std::stoi(in), 1);
             else {
-                Debug::log(ERR, "Relative workspace on no mon!");
-                result = INT_MAX;
+                // maybe name
+                const auto PWORKSPACE = g_pCompositor->getWorkspaceByName(in);
+                if (PWORKSPACE)
+                    result = PWORKSPACE->m_iID;
             }
+
             outName = std::to_string(result);
-        }        
+        }
     }
 
     return result;
 }
 
 float vecToRectDistanceSquared(const Vector2D& vec, const Vector2D& p1, const Vector2D& p2) {
-    const float DX = std::max((double)0, std::max(p1.x - vec.x, vec.x - p2.x));
-    const float DY = std::max((double)0, std::max(p1.y - vec.y, vec.y - p2.y));
+    const float DX = std::max({0.0, p1.x - vec.x, vec.x - p2.x});
+    const float DY = std::max({0.0, p1.y - vec.y, vec.y - p2.y});
     return DX * DX + DY * DY;
 }
 
@@ -324,4 +353,39 @@ void matrixProjection(float mat[9], int w, int h, wl_output_transform tr) {
 
     // Identity
     mat[8] = 1.0f;
+}
+
+int64_t getPPIDof(int64_t pid) {
+    std::string dir = "/proc/" + std::to_string(pid) + "/status";
+    FILE* infile;
+
+    infile = fopen(dir.c_str(), "r");
+    if (!infile)
+        return 0;
+
+    char* line = nullptr;
+    size_t len = 0;
+    ssize_t len2 = 0;
+
+    std::string pidstr;
+
+    while ((len2 = getline(&line, &len, infile)) != -1) {
+        if (strstr(line, "PPid:")) {
+            pidstr = std::string(line, len2);
+            const auto tabpos = pidstr.find_last_of('\t');
+            if (tabpos != std::string::npos)
+                pidstr = pidstr.substr(tabpos);
+            break;
+        }
+    }
+
+    fclose(infile);
+    if (line)
+        free(line);
+
+    try {
+        return std::stoll(pidstr);
+    } catch (std::exception& e) {
+        return 0;
+    }
 }

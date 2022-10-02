@@ -48,7 +48,7 @@ void CConfigManager::setDefaultVars() {
     configValues["general:no_cursor_warps"].intValue = 0;
 
     configValues["general:layout"].strValue = "dwindle";
-    
+
     configValues["misc:disable_hyprland_logo"].intValue = 0;
     configValues["misc:disable_splash_rendering"].intValue = 0;
     configValues["misc:no_vfr"].intValue = 1;
@@ -58,6 +58,8 @@ void CConfigManager::setDefaultVars() {
     configValues["misc:layers_hog_keyboard_focus"].intValue = 1;
     configValues["misc:animate_manual_resizes"].intValue = 0;
     configValues["misc:disable_autoreload"].intValue = 0;
+    configValues["misc:enable_swallow"].intValue = 0;
+    configValues["misc:swallow_regex"].strValue = STRVAL_EMPTY;
 
     configValues["debug:int"].intValue = 0;
     configValues["debug:log_damage"].intValue = 0;
@@ -81,7 +83,7 @@ void CConfigManager::setDefaultVars() {
     configValues["decoration:shadow_range"].intValue = 4;
     configValues["decoration:shadow_render_power"].intValue = 3;
     configValues["decoration:shadow_ignore_window"].intValue = 1;
-    configValues["decoration:shadow_offset"].strValue = "0 0";
+    configValues["decoration:shadow_offset"].vecValue = Vector2D();
     configValues["decoration:col.shadow"].intValue = 0xee1a1a1a;
     configValues["decoration:col.shadow_inactive"].intValue = INT_MAX;
     configValues["decoration:dim_inactive"].intValue = 0;
@@ -205,7 +207,7 @@ void CConfigManager::setDefaultAnimationVars() {
         // workspaces
         INITANIMCFG("specialWorkspace");
     }
-    
+
     // init the values
     animationConfig["global"] = {
         false,
@@ -236,7 +238,7 @@ void CConfigManager::setDefaultAnimationVars() {
 }
 
 void CConfigManager::init() {
-    
+
     loadConfigLoadVars();
 
     const char* const ENVHOME = getenv("HOME");
@@ -292,7 +294,7 @@ void CConfigManager::configSetValueSafe(const std::string& COMMAND, const std::s
 
     CONFIGENTRY->set = true;
 
-    if (CONFIGENTRY->intValue != -1) {
+    if (CONFIGENTRY->intValue != -INT64_MAX) {
         try {
             if (VALUE.find("0x") == 0) {
                 // Values with 0x are hex
@@ -309,7 +311,7 @@ void CConfigManager::configSetValueSafe(const std::string& COMMAND, const std::s
             Debug::log(WARN, "Error reading value of %s", COMMAND.c_str());
             parseError = "Error setting value <" + VALUE + "> for field <" + COMMAND + ">.";
         }
-    } else if (CONFIGENTRY->floatValue != -1) {
+    } else if (CONFIGENTRY->floatValue != -__FLT_MAX__) {
         try {
             CONFIGENTRY->floatValue = stof(VALUE);
         } catch (...) {
@@ -319,6 +321,23 @@ void CConfigManager::configSetValueSafe(const std::string& COMMAND, const std::s
     } else if (CONFIGENTRY->strValue != "") {
         try {
             CONFIGENTRY->strValue = VALUE;
+        } catch (...) {
+            Debug::log(WARN, "Error reading value of %s", COMMAND.c_str());
+            parseError = "Error setting value <" + VALUE + "> for field <" + COMMAND + ">.";
+        }
+    } else if (CONFIGENTRY->vecValue != Vector2D(-__FLT_MAX__, -__FLT_MAX__)) {
+        try {
+            if (const auto SPACEPOS = VALUE.find(' '); SPACEPOS != std::string::npos) {
+                const auto X = VALUE.substr(0, SPACEPOS);
+                const auto Y = VALUE.substr(SPACEPOS + 1);
+
+                if (isNumber(X, true) && isNumber(Y, true)) {
+                    CONFIGENTRY->vecValue = Vector2D(std::stof(X), std::stof(Y));
+                }
+            } else {
+                Debug::log(WARN, "Error reading value of %s", COMMAND.c_str());
+                parseError = "Error setting value <" + VALUE + "> for field <" + COMMAND + ">.";
+            }
         } catch (...) {
             Debug::log(WARN, "Error reading value of %s", COMMAND.c_str());
             parseError = "Error setting value <" + VALUE + "> for field <" + COMMAND + ">.";
@@ -450,7 +469,7 @@ void CConfigManager::handleMonitor(const std::string& command, const std::string
             return;
         }
 
-        if (std::find_if(m_dMonitorRules.begin(), m_dMonitorRules.end(), [&](const auto& other) { return other.name == newrule.name; }) != m_dMonitorRules.end()) 
+        if (std::find_if(m_dMonitorRules.begin(), m_dMonitorRules.end(), [&](const auto& other) { return other.name == newrule.name; }) != m_dMonitorRules.end())
             m_dMonitorRules.erase(std::remove_if(m_dMonitorRules.begin(), m_dMonitorRules.end(), [&](const auto& other) { return other.name == newrule.name; }));
 
         m_dMonitorRules.push_back(newrule);
@@ -460,6 +479,10 @@ void CConfigManager::handleMonitor(const std::string& command, const std::string
 
     if (curitem.find("pref") == 0) {
         newrule.resolution = Vector2D();
+    } else if(curitem.find("highrr") == 0) {
+        newrule.resolution = Vector2D(-1,-1);
+    } else if(curitem.find("highres") == 0) {
+        newrule.resolution = Vector2D(-1,-2);
     } else {
         newrule.resolution.x = stoi(curitem.substr(0, curitem.find_first_of('x')));
         newrule.resolution.y = stoi(curitem.substr(curitem.find_first_of('x') + 1, curitem.find_first_of('@')));
@@ -589,7 +612,7 @@ void CConfigManager::handleAnimation(const std::string& command, const std::stri
 
     // anim name
     const auto ANIMNAME = curitem;
-    
+
     const auto PANIM = animationConfig.find(ANIMNAME);
 
     if (PANIM == animationConfig.end()) {
@@ -745,7 +768,7 @@ void CConfigManager::handleUnbind(const std::string& command, const std::string&
 }
 
 bool windowRuleValid(const std::string& RULE) {
-    return !(RULE != "float" 
+    return !(RULE != "float"
         && RULE != "tile"
         && RULE.find("opacity") != 0
         && RULE.find("move") != 0
@@ -871,7 +894,7 @@ void CConfigManager::handleDefaultWorkspace(const std::string& command, const st
 }
 
 void CConfigManager::handleSubmap(const std::string& command, const std::string& submap) {
-    if (submap == "reset") 
+    if (submap == "reset")
         m_szCurrentSubmap = "";
     else
         m_szCurrentSubmap = submap;
@@ -934,6 +957,13 @@ void CConfigManager::handleSource(const std::string& command, const std::string&
 void CConfigManager::handleBindWS(const std::string& command, const std::string& value) {
     const auto WS = value.substr(0, value.find_first_of(','));
     const auto MON = value.substr(value.find_first_of(',') + 1);
+
+    const auto FOUND = std::find_if(boundWorkspaces.begin(), boundWorkspaces.end(), [&](const auto& other) { return other.first == WS; });
+
+    if (FOUND != boundWorkspaces.end()) {
+        FOUND->second = MON;
+        return;
+    }
 
     boundWorkspaces.push_back({WS, MON});
 }
@@ -1040,9 +1070,9 @@ void CConfigManager::parseLine(std::string& line) {
 
         if (LASTSEP == std::string::npos || currentCategory.contains("device"))
             currentCategory = "";
-        else 
+        else
             currentCategory = currentCategory.substr(0, LASTSEP);
-        
+
         return;
     }
 
@@ -1067,7 +1097,7 @@ void CConfigManager::loadConfigLoadVars() {
     Debug::log(LOG, "Reloading the config!");
     parseError = "";       // reset the error
     currentCategory = "";  // reset the category
-    
+
     // reset all vars before loading
     setDefaultVars();
     m_dMonitorRules.clear();
@@ -1096,7 +1126,7 @@ void CConfigManager::loadConfigLoadVars() {
     }
 
     configPaths.push_back(CONFIGPATH);
- 
+
     std::ifstream ifs;
     ifs.open(CONFIGPATH);
 
@@ -1208,7 +1238,7 @@ void CConfigManager::loadConfigLoadVars() {
         // Force the compositor to fully re-render all monitors
         m->forceFullFrames = 2;
     }
-    
+
     // Reset no monitor reload
     m_bNoMonitorReload = false;
 }

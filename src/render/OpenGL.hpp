@@ -8,7 +8,6 @@
 
 #include <cairo/cairo.h>
 
-#include "Shaders.hpp"
 #include "Shader.hpp"
 #include "Texture.hpp"
 #include "Framebuffer.hpp"
@@ -140,8 +139,7 @@ private:
     CFramebuffer*           blurMainFramebufferWithDamage(float a, wlr_box* pBox, pixman_region32_t* damage);
 
     void                    renderTextureInternalWithDamage(const CTexture&, wlr_box* pBox, float a, pixman_region32_t* damage, int round = 0, bool discardOpaque = false, bool noAA = false, bool allowCustomUV = false, bool allowDim = false);
-
-    void                    renderSplash(cairo_t *const, cairo_surface_t *const);
+    void                    renderSplash(cairo_t *const, cairo_surface_t *const, double);
 
     void                    preBlurForCurrentMonitor();
 };

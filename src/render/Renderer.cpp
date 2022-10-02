@@ -15,8 +15,8 @@ void renderSurface(struct wlr_surface* surface, int x, int y, void* data) {
     if (RDATA->surface && surface == RDATA->surface)
         windowBox = {(int)outputX + RDATA->x + x, (int)outputY + RDATA->y + y, RDATA->w, RDATA->h};
     else                                                                                              //  here we clamp to 2, these might be some tiny specks
-        windowBox = {(int)outputX + RDATA->x + x, (int)outputY + RDATA->y + y, std::clamp(surface->current.width, 2, 1337420), std::clamp(surface->current.height, 2, 1337420)};
-    
+        windowBox = {(int)outputX + RDATA->x + x, (int)outputY + RDATA->y + y, std::max(surface->current.width, 2), std::max(surface->current.height, 2)};
+
     if (RDATA->squishOversized) {
         if (x + windowBox.width > RDATA->w)
             windowBox.width = RDATA->w - x;
@@ -26,7 +26,7 @@ void renderSurface(struct wlr_surface* surface, int x, int y, void* data) {
 
     if (RDATA->pWindow)
         g_pHyprRenderer->calculateUVForWindowSurface(RDATA->pWindow, surface, RDATA->squishOversized);
-    
+
     scaleBox(&windowBox, RDATA->output->scale);
 
     static auto *const PROUNDING = &g_pConfigManager->getConfigValuePtr("decoration:rounding")->intValue;
@@ -219,15 +219,15 @@ void CHyprRenderer::renderWindow(CWindow* pWindow, CMonitor* pMonitor, timespec*
             g_pHyprOpenGL->renderSnapshot(&pWindow);
         return;
     }
-    
+
     const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(pWindow->m_iWorkspaceID);
     const auto REALPOS = pWindow->m_vRealPosition.vec() + (pWindow->m_bPinned ? Vector2D{} : PWORKSPACE->m_vRenderOffset.vec());
     static const auto PNOFLOATINGBORDERS = &g_pConfigManager->getConfigValuePtr("general:no_border_on_floating")->intValue;
 
     SRenderData renderdata = {pMonitor->output, time, REALPOS.x, REALPOS.y};
     renderdata.surface = g_pXWaylandManager->getWindowSurface(pWindow);
-    renderdata.w = std::clamp(pWindow->m_vRealSize.vec().x, (double)5, (double)1337420); // clamp the size to min 5,
-    renderdata.h = std::clamp(pWindow->m_vRealSize.vec().y, (double)5, (double)1337420); // otherwise we'll have issues later with invalid boxes
+    renderdata.w = std::max(pWindow->m_vRealSize.vec().x, 5.0); // clamp the size to min 5,
+    renderdata.h = std::max(pWindow->m_vRealSize.vec().y, 5.0); // otherwise we'll have issues later with invalid boxes
     renderdata.dontRound = (pWindow->m_bIsFullscreen && PWORKSPACE->m_efFullscreenMode == FULLSCREEN_FULL) || (!pWindow->m_sSpecialRenderData.rounding);
     renderdata.fadeAlpha = pWindow->m_fAlpha.fl() * (pWindow->m_bPinned ? 1.f : (PWORKSPACE->m_fAlpha.fl() / 255.f));
     renderdata.alpha = pWindow->m_fActiveInactiveAlpha.fl();
@@ -407,7 +407,7 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
     for (auto& w : g_pCompositor->m_vWindows) {
         if (w->m_bHidden && !w->m_bIsMapped && !w->m_bFadingOut)
             continue;
-            
+
         if (w->m_iWorkspaceID != SPECIAL_WORKSPACE_ID)
             continue;
 
@@ -492,8 +492,8 @@ void CHyprRenderer::calculateUVForWindowSurface(CWindow* pWindow, wlr_surface* p
                 g_pHyprOpenGL->m_RenderData.primarySurfaceUVTopLeft = Vector2D(0, 0);
 
             g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight = Vector2D(
-                g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight.x * ((double)pWindow->m_vRealSize.vec().x / ((double)geom.width / g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight.x)),
-                g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight.y * ((double)pWindow->m_vRealSize.vec().y / ((double)geom.height / g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight.y)));
+                g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight.x * (pWindow->m_vRealSize.vec().x / ((double)geom.width / g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight.x)),
+                g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight.y * (pWindow->m_vRealSize.vec().y / ((double)geom.height / g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight.y)));
         }
     } else {
         g_pHyprOpenGL->m_RenderData.primarySurfaceUVTopLeft = Vector2D(-1, -1);
@@ -924,7 +924,7 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
     pMonitor->vecPosition = pMonitorRule->offset;
 
     // loop over modes and choose an appropriate one.
-    if (pMonitorRule->resolution != Vector2D()) {
+    if (pMonitorRule->resolution != Vector2D() && pMonitorRule->resolution != Vector2D(-1,-1) && pMonitorRule->resolution != Vector2D(-1,-2)) {
         if (!wl_list_empty(&pMonitor->output->modes)) {
             wlr_output_mode* mode;
             bool found = false;
@@ -957,6 +957,7 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
             if (!found) {
                 wlr_output_set_custom_mode(pMonitor->output, (int)pMonitorRule->resolution.x, (int)pMonitorRule->resolution.y, (int)pMonitorRule->refreshRate * 1000);
                 pMonitor->vecSize = pMonitorRule->resolution;
+                pMonitor->refreshRate = pMonitorRule->refreshRate;
 
                 if (!wlr_output_test(pMonitor->output)) {
                     Debug::log(ERR, "Custom resolution FAILED, falling back to preferred");
@@ -985,8 +986,95 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
         } else {
             wlr_output_set_custom_mode(pMonitor->output, (int)pMonitorRule->resolution.x, (int)pMonitorRule->resolution.y, (int)pMonitorRule->refreshRate * 1000);
             pMonitor->vecSize = pMonitorRule->resolution;
+            pMonitor->refreshRate = pMonitorRule->refreshRate;
 
-            Debug::log(LOG, "Setting custom mode for %s", pMonitor->output->name);
+            if (!wlr_output_test(pMonitor->output)) {
+                Debug::log(ERR, "Custom resolution FAILED, falling back to preferred");
+
+                const auto PREFERREDMODE = wlr_output_preferred_mode(pMonitor->output);
+
+                if (!PREFERREDMODE) {
+                    Debug::log(ERR, "Monitor %s has NO PREFERRED MODE, and an INVALID one was requested: %ix%i@%2f", (int)pMonitorRule->resolution.x, (int)pMonitorRule->resolution.y, (float)pMonitorRule->refreshRate);
+                    return true;
+                }
+
+                // Preferred is valid
+                wlr_output_set_mode(pMonitor->output, PREFERREDMODE);
+
+                Debug::log(ERR, "Monitor %s got an invalid requested mode: %ix%i@%2f, using the preferred one instead: %ix%i@%2f", pMonitor->output->name, (int)pMonitorRule->resolution.x, (int)pMonitorRule->resolution.y, (float)pMonitorRule->refreshRate, PREFERREDMODE->width, PREFERREDMODE->height, PREFERREDMODE->refresh / 1000.f);
+
+                pMonitor->refreshRate = PREFERREDMODE->refresh / 1000.f;
+                pMonitor->vecSize = Vector2D(PREFERREDMODE->width, PREFERREDMODE->height);
+            } else {
+                Debug::log(LOG, "Set a custom mode %ix%i@%2f (mode not found in monitor modes)", (int)pMonitorRule->resolution.x, (int)pMonitorRule->resolution.y, (float)pMonitorRule->refreshRate);
+            }
+        }
+    } else if (pMonitorRule->resolution != Vector2D()) {
+        if (!wl_list_empty(&pMonitor->output->modes)) {
+            wlr_output_mode* mode;
+            float currentWidth = 0;
+            float currentHeight = 0;
+            float currentRefresh  = 0;
+            bool success = false;
+
+            //(-1,-1) indicates a preference to refreshrate over resolution, (-1,-2) preference to resolution
+            if(pMonitorRule->resolution == Vector2D(-1,-1)) {
+                wl_list_for_each(mode, &pMonitor->output->modes, link) {
+                   if( ( mode->width >= currentWidth && mode->height >= currentHeight && mode->refresh >= ( currentRefresh - 1000.f ) ) || mode->refresh > ( currentRefresh + 3000.f ) ) {
+                   wlr_output_set_mode(pMonitor->output, mode);
+                       if (wlr_output_test(pMonitor->output)) {
+                           currentWidth = mode->width;
+                           currentHeight = mode->height;
+                           currentRefresh = mode->refresh;
+                           success = true;
+                       }
+                   }
+                }
+            } else {
+                wl_list_for_each(mode, &pMonitor->output->modes, link) {
+                   if( ( mode->width >= currentWidth && mode->height >= currentHeight && mode->refresh >= ( currentRefresh - 1000.f ) ) || ( mode->width > currentWidth && mode->height > currentHeight ) ) {
+                   wlr_output_set_mode(pMonitor->output, mode);
+                       if (wlr_output_test(pMonitor->output)) {
+                           currentWidth = mode->width;
+                           currentHeight = mode->height;
+                           currentRefresh = mode->refresh;
+                           success = true;
+                       }
+                   }
+                }
+            }
+
+            if (!success) {
+                Debug::log(LOG, "Monitor %s: REJECTED mode: %ix%i@%2f! Falling back to preferred.",
+                           pMonitor->output->name, (int)pMonitorRule->resolution.x, (int)pMonitorRule->resolution.y, (float)pMonitorRule->refreshRate,
+                           mode->width, mode->height, mode->refresh / 1000.f);
+
+                const auto PREFERREDMODE = wlr_output_preferred_mode(pMonitor->output);
+
+                if (!PREFERREDMODE) {
+                    Debug::log(ERR, "Monitor %s has NO PREFERRED MODE, and an INVALID one was requested: %ix%i@%2f",
+                               (int)pMonitorRule->resolution.x, (int)pMonitorRule->resolution.y, (float)pMonitorRule->refreshRate);
+                    return true;
+                }
+
+                // Preferred is valid
+                wlr_output_set_mode(pMonitor->output, PREFERREDMODE);
+
+                Debug::log(ERR, "Monitor %s got an invalid requested mode: %ix%i@%2f, using the preferred one instead: %ix%i@%2f",
+                           pMonitor->output->name, (int)pMonitorRule->resolution.x, (int)pMonitorRule->resolution.y, (float)pMonitorRule->refreshRate,
+                           PREFERREDMODE->width, PREFERREDMODE->height, PREFERREDMODE->refresh / 1000.f);
+
+                pMonitor->refreshRate = PREFERREDMODE->refresh / 1000.f;
+                pMonitor->vecSize = Vector2D(PREFERREDMODE->width, PREFERREDMODE->height);
+            } else {
+
+                Debug::log(LOG, "Monitor %s: Applying highest mode %ix%i@%2f.",
+                           pMonitor->output->name, (int)currentWidth, (int)currentHeight, (int)currentRefresh / 1000.f,
+                           mode->width, mode->height, mode->refresh / 1000.f);
+
+                pMonitor->refreshRate = currentRefresh / 1000.f;
+                pMonitor->vecSize = Vector2D(currentWidth, currentHeight);
+            }
         }
     } else {
         const auto PREFERREDMODE = wlr_output_preferred_mode(pMonitor->output);
@@ -1028,7 +1116,7 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
             Debug::log(LOG, "Setting preferred mode for %s", pMonitor->output->name);
         }
     }
-    
+
 
     wlr_output_set_transform(pMonitor->output, pMonitorRule->transform);
     pMonitor->transform = pMonitorRule->transform;

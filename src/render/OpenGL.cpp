@@ -1,6 +1,7 @@
 #include "OpenGL.hpp"
 #include "../Compositor.hpp"
 #include "../helpers/MiscFunctions.hpp"
+#include "Shaders.hpp"
 
 CHyprOpenGLImpl::CHyprOpenGLImpl() {
     RASSERT(eglMakeCurrent(wlr_egl_get_display(g_pCompositor->m_sWLREGL), EGL_NO_SURFACE, EGL_NO_SURFACE, wlr_egl_get_context(g_pCompositor->m_sWLREGL)), "Couldn't unset current EGL!");
@@ -455,14 +456,14 @@ void CHyprOpenGLImpl::renderTextureInternalWithDamage(const CTexture& tex, wlr_b
         glUniform1i(shader->applyTint, 0);
     }
 
-    glVertexAttribPointer(shader->posAttrib, 2, GL_FLOAT, GL_FALSE, 0, fullVerts);
-
     const float verts[] = {
         m_RenderData.primarySurfaceUVBottomRight.x, m_RenderData.primarySurfaceUVTopLeft.y,      // top right
         m_RenderData.primarySurfaceUVTopLeft.x, m_RenderData.primarySurfaceUVTopLeft.y,          // top left
         m_RenderData.primarySurfaceUVBottomRight.x, m_RenderData.primarySurfaceUVBottomRight.y,  // bottom right
         m_RenderData.primarySurfaceUVTopLeft.x, m_RenderData.primarySurfaceUVBottomRight.y,      // bottom left
     };
+
+    glVertexAttribPointer(shader->posAttrib, 2, GL_FLOAT, GL_FALSE, 0, fullVerts);
 
     if (allowCustomUV && m_RenderData.primarySurfaceUVTopLeft != Vector2D(-1, -1)) {
         glVertexAttribPointer(shader->texAttrib, 2, GL_FLOAT, GL_FALSE, 0, verts);
@@ -517,7 +518,7 @@ CFramebuffer* CHyprOpenGLImpl::blurMainFramebufferWithDamage(float a, wlr_box* p
     pixman_region32_copy(&damage, originalDamage);
     wlr_region_transform(&damage, &damage, wlr_output_transform_invert(m_RenderData.pMonitor->transform), m_RenderData.pMonitor->vecTransformedSize.x, m_RenderData.pMonitor->vecTransformedSize.y);
     wlr_region_expand(&damage, &damage, pow(2, *PBLURPASSES) * *PBLURSIZE);
-   
+
     // helper
     const auto PMIRRORFB = &m_RenderData.pCurrentMonData->mirrorFB;
     const auto PMIRRORSWAPFB = &m_RenderData.pCurrentMonData->mirrorSwapFB;
@@ -581,7 +582,7 @@ CFramebuffer* CHyprOpenGLImpl::blurMainFramebufferWithDamage(float a, wlr_box* p
     pixman_region32_t tempDamage;
     pixman_region32_init(&tempDamage);
     wlr_region_scale(&tempDamage, &damage, 1.f / 2.f);  // when DOWNscaling, we make the region twice as small because it's the TARGET
-   
+
     drawPass(&m_RenderData.pCurrentMonData->m_shBLUR1, &tempDamage);
 
     // and draw
@@ -663,7 +664,7 @@ void CHyprOpenGLImpl::preWindowPass() {
     for (auto& w : g_pCompositor->m_vWindows) {
         if (w->m_iWorkspaceID == m_RenderData.pMonitor->activeWorkspace && !w->m_bHidden && w->m_bIsMapped && !w->m_bIsFloating) {
             hasWindows = true;
-            break;  
+            break;
         }
     }
 
@@ -780,27 +781,29 @@ void CHyprOpenGLImpl::renderBorder(wlr_box* box, const CColor& col, int round) {
     if (*PBORDERSIZE < 1)
         return;
 
+    int scaledBorderSize = *PBORDERSIZE * m_RenderData.pMonitor->scale;
+
     if (round < 1) {
         // zero rounding, just lines
-        wlr_box borderbox = {box->x - *PBORDERSIZE, box->y - *PBORDERSIZE, *PBORDERSIZE, box->height + 2 * *PBORDERSIZE};
+        wlr_box borderbox = {box->x - scaledBorderSize, box->y - scaledBorderSize, scaledBorderSize, box->height + 2 * scaledBorderSize};
         renderRect(&borderbox, col, 0); // left
-        borderbox = {box->x, box->y - (int)*PBORDERSIZE, box->width + (int)*PBORDERSIZE, (int)*PBORDERSIZE};
+        borderbox = {box->x, box->y - (int)scaledBorderSize, box->width + (int)scaledBorderSize, (int)scaledBorderSize};
         renderRect(&borderbox, col, 0);  // top
-        borderbox = {box->x + box->width, box->y, (int)*PBORDERSIZE, box->height + (int)*PBORDERSIZE};
+        borderbox = {box->x + box->width, box->y, (int)scaledBorderSize, box->height + (int)scaledBorderSize};
         renderRect(&borderbox, col, 0);  // right
-        borderbox = {box->x, box->y + box->height, box->width, (int)*PBORDERSIZE};
+        borderbox = {box->x, box->y + box->height, box->width, (int)scaledBorderSize};
         renderRect(&borderbox, col, 0);  // bottom
 
         return;
     }
 
     // adjust box
-    box->x -= *PBORDERSIZE;
-    box->y -= *PBORDERSIZE;
-    box->width += 2 * *PBORDERSIZE;
-    box->height += 2 * *PBORDERSIZE;
+    box->x -= scaledBorderSize;
+    box->y -= scaledBorderSize;
+    box->width += 2 * scaledBorderSize;
+    box->height += 2 * scaledBorderSize;
 
-    round += *PBORDERSIZE;
+    round += scaledBorderSize;
 
     float matrix[9];
     wlr_matrix_project_box(matrix, box, wlr_output_transform_invert(!m_bEndFrame ? WL_OUTPUT_TRANSFORM_NORMAL : m_RenderData.pMonitor->transform), 0, m_RenderData.pMonitor->output->transform_matrix);  // TODO: write own, don't use WLR here
@@ -827,7 +830,7 @@ void CHyprOpenGLImpl::renderBorder(wlr_box* box, const CColor& col, int round) {
     glUniform2f(m_RenderData.pCurrentMonData->m_shBORDER1.bottomRight, (float)BOTTOMRIGHT.x, (float)BOTTOMRIGHT.y);
     glUniform2f(m_RenderData.pCurrentMonData->m_shBORDER1.fullSize, (float)FULLSIZE.x, (float)FULLSIZE.y);
     glUniform1f(m_RenderData.pCurrentMonData->m_shBORDER1.radius, round);
-    glUniform1f(m_RenderData.pCurrentMonData->m_shBORDER1.thick, *PBORDERSIZE);
+    glUniform1f(m_RenderData.pCurrentMonData->m_shBORDER1.thick, scaledBorderSize);
     glUniform1i(m_RenderData.pCurrentMonData->m_shBORDER1.primitiveMultisample, *PMULTISAMPLE);
 
     glVertexAttribPointer(m_RenderData.pCurrentMonData->m_shBORDER1.posAttrib, 2, GL_FLOAT, GL_FALSE, 0, fullVerts);
@@ -1113,18 +1116,19 @@ void CHyprOpenGLImpl::renderMirrored() {
     renderTexture(PFB->m_cTex, &monbox, 255.f, 0, false, false);
 }
 
-void CHyprOpenGLImpl::renderSplash(cairo_t *const CAIRO, cairo_surface_t *const CAIROSURFACE) {
+void CHyprOpenGLImpl::renderSplash(cairo_t *const CAIRO, cairo_surface_t *const CAIROSURFACE, double offsetY) {
     cairo_select_font_face(CAIRO, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
 
-    const auto FONTSIZE = (int)(m_RenderData.pMonitor->vecPixelSize.y / 76); 
+    const auto FONTSIZE = (int)(m_RenderData.pMonitor->vecPixelSize.y / 76);
     cairo_set_font_size(CAIRO, FONTSIZE);
 
-    cairo_set_source_rgba(CAIRO, 1.f, 1.f, 1.f, 0.32f);
+    cairo_set_source_rgba(CAIRO, 1.0, 1.0, 1.0, 0.32);
 
     cairo_text_extents_t textExtents;
     cairo_text_extents(CAIRO, g_pCompositor->m_szCurrentSplash.c_str(), &textExtents);
 
-    cairo_move_to(CAIRO, m_RenderData.pMonitor->vecPixelSize.x / 2.f - textExtents.width / 2.f, m_RenderData.pMonitor->vecPixelSize.y - textExtents.height - 1);
+    cairo_move_to(CAIRO, (m_RenderData.pMonitor->vecPixelSize.x - textExtents.width) / 2.0, m_RenderData.pMonitor->vecPixelSize.y - textExtents.height + offsetY);
+
     cairo_show_text(CAIRO, g_pCompositor->m_szCurrentSplash.c_str());
 
     cairo_surface_flush(CAIROSURFACE);
@@ -1166,13 +1170,37 @@ void CHyprOpenGLImpl::createBGTextureForMonitor(CMonitor* pMonitor) {
 
     PTEX->m_vSize = textureSize;
 
+    // calc the target box
+    const double MONRATIO = m_RenderData.pMonitor->vecTransformedSize.x / m_RenderData.pMonitor->vecTransformedSize.y;
+    const double WPRATIO = 1.77;
+
+    Vector2D origin;
+    double scale;
+
+    if (MONRATIO > WPRATIO) {
+        scale = m_RenderData.pMonitor->vecTransformedSize.x / PTEX->m_vSize.x;
+
+        origin.y = (m_RenderData.pMonitor->vecTransformedSize.y - PTEX->m_vSize.y * scale) / 2.0;
+    } else {
+        scale = m_RenderData.pMonitor->vecTransformedSize.y / PTEX->m_vSize.y;
+
+        origin.x = (m_RenderData.pMonitor->vecTransformedSize.x - PTEX->m_vSize.x * scale) / 2.0;
+    }
+
+    wlr_box box = {origin.x, origin.y, PTEX->m_vSize.x * scale, PTEX->m_vSize.y * scale};
+
+    m_mMonitorRenderResources[pMonitor].backgroundTexBox = box;
+
     // create a new one with cairo
     const auto CAIROSURFACE = cairo_image_surface_create_from_png(texPath.c_str());
-
     const auto CAIRO = cairo_create(CAIROSURFACE);
 
+    // scale it to fit the current monitor
+    cairo_scale(CAIRO, textureSize.x / pMonitor->vecTransformedSize.x, textureSize.y / pMonitor->vecTransformedSize.y);
+
+    // render splash on wallpaper
     if (!*PNOSPLASH)
-        renderSplash(CAIRO, CAIROSURFACE);
+        renderSplash(CAIRO, CAIROSURFACE, origin.y * WPRATIO / MONRATIO);
 
     // copy the data to an OpenGL texture we have
     const auto DATA = cairo_image_surface_get_data(CAIROSURFACE);
@@ -1187,28 +1215,6 @@ void CHyprOpenGLImpl::createBGTextureForMonitor(CMonitor* pMonitor) {
 
     cairo_surface_destroy(CAIROSURFACE);
     cairo_destroy(CAIRO);
-
-    // calc the target box
-
-    const float MONRATIO = m_RenderData.pMonitor->vecTransformedSize.x / m_RenderData.pMonitor->vecTransformedSize.y;
-    const float WPRATIO = 1.77f;
-
-    Vector2D origin;
-    float scale;
-
-    if (MONRATIO > WPRATIO) {
-        scale = m_RenderData.pMonitor->vecTransformedSize.x / PTEX->m_vSize.x;
-
-        origin.y = -(PTEX->m_vSize.y * scale - m_RenderData.pMonitor->vecTransformedSize.y) / 2.f / scale;
-    } else {
-        scale = m_RenderData.pMonitor->vecTransformedSize.y / PTEX->m_vSize.y;
-
-        origin.x = -(PTEX->m_vSize.x * scale - m_RenderData.pMonitor->vecTransformedSize.x) / 2.f / scale;
-    }
-
-    wlr_box box = {origin.x * scale, origin.y * scale, PTEX->m_vSize.x * scale, PTEX->m_vSize.y * scale};
-
-    m_mMonitorRenderResources[pMonitor].backgroundTexBox = box;
 
     Debug::log(LOG, "Background created for monitor %s", pMonitor->szName.c_str());
 }

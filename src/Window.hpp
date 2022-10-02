@@ -14,7 +14,8 @@ struct SWindowSpecialRenderData {
     // set by the layout
     bool rounding = true;
     bool border = true;
-};  
+    bool decorate = true;
+};
 
 struct SWindowAdditionalConfigData {
     std::string animationStyle = "";
@@ -144,6 +145,9 @@ public:
 
     // animated tint
     CAnimatedVariable m_fDimPercent;
+
+    // swallowing
+    CWindow*          m_pSwallowed = nullptr;
 
     // for toplevel monitor events
     uint64_t          m_iLastToplevelMonitorID = -1;

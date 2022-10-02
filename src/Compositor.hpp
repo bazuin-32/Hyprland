@@ -86,13 +86,13 @@ public:
     std::vector<CWindow*>                       m_vWindowsFadingOut;
     std::vector<SLayerSurface*>                 m_vSurfacesFadingOut;
 
-    void                    startCompositor(); 
+    void                    startCompositor();
     void                    cleanup();
 
     wlr_surface*            m_pLastFocus = nullptr;
     CWindow*                m_pLastWindow = nullptr;
     CMonitor*               m_pLastMonitor = nullptr;
-    
+
     SSeat                   m_sSeat;
 
     bool                    m_bReadyToProcess = false;
@@ -138,8 +138,8 @@ public:
     void                    cleanupFadingOut(const int& monid);
     CWindow*                getWindowInDirection(CWindow*, char);
     void                    deactivateAllWLRWorkspaces(wlr_ext_workspace_handle_v1* exclude = nullptr);
-    CWindow*                getNextWindowOnWorkspace(CWindow*);
-    CWindow*                getPrevWindowOnWorkspace(CWindow*);
+    CWindow*                getNextWindowOnWorkspace(CWindow*, bool focusableOnly = false);
+    CWindow*                getPrevWindowOnWorkspace(CWindow*, bool focusableOnly = false);
     int                     getNextAvailableNamedWorkspace();
     bool                    isPointOnAnyMonitor(const Vector2D&);
     CWindow*                getConstraintWindow(SMouse*);
@@ -165,14 +165,14 @@ public:
     Vector2D                parseWindowVectorArgsRelative(const std::string&, const Vector2D&);
     void                    forceReportSizesToWindowsOnWorkspace(const int&);
     bool                    cursorOnReservedArea();
-    
+
     std::string             explicitConfigPath;
 
 private:
     void                    initAllSignals();
-    void                    setRandomSplash();   
+    void                    setRandomSplash();
 
-    uint64_t                m_iHyprlandPID = 0; 
+    uint64_t                m_iHyprlandPID = 0;
 };
 
 

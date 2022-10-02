@@ -133,7 +133,7 @@ void CHyprMasterLayout::recalculateMonitor(const int& monid) {
     }
 
     if (PWORKSPACE->m_bHasFullscreenWindow) {
-        if (PWORKSPACE->m_efFullscreenMode == FULLSCREEN_FULL) 
+        if (PWORKSPACE->m_efFullscreenMode == FULLSCREEN_FULL)
             return;
 
         // massive hack from the fullscreen func
@@ -252,12 +252,14 @@ void CHyprMasterLayout::applyNodeDataToWindow(SMasterNodeData* pNode) {
 
         PWINDOW->m_sSpecialRenderData.rounding = false;
         PWINDOW->m_sSpecialRenderData.border = false;
+        PWINDOW->m_sSpecialRenderData.decorate = false;
 
         return;
     }
 
     PWINDOW->m_sSpecialRenderData.rounding = true;
     PWINDOW->m_sSpecialRenderData.border = true;
+    PWINDOW->m_sSpecialRenderData.decorate = true;
 
     const auto OFFSETTOPLEFT = Vector2D(DISPLAYLEFT ? *PGAPSOUT : *PGAPSIN,
                                         DISPLAYTOP ? *PGAPSOUT : *PGAPSIN);
@@ -307,7 +309,7 @@ void CHyprMasterLayout::resizeActiveWindow(const Vector2D& pixResize, CWindow* p
     const auto PNODE = getNodeFromWindow(PWINDOW);
 
     if (!PNODE) {
-        PWINDOW->m_vRealSize = Vector2D(std::clamp((PWINDOW->m_vRealSize.goalv() + pixResize).x, (double)20, (double)999999), std::clamp((PWINDOW->m_vRealSize.goalv() + pixResize).y, (double)20, (double)999999));
+      PWINDOW->m_vRealSize = Vector2D(std::max((PWINDOW->m_vRealSize.goalv() + pixResize).x, 20.0), std::max((PWINDOW->m_vRealSize.goalv() + pixResize).y, 20.0));
         PWINDOW->updateWindowDecos();
         return;
     }

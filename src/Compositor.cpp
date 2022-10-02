@@ -198,6 +198,9 @@ void CCompositor::initAllSignals() {
     addWLSignal(&m_sWLRCursor->events.touch_down, &Events::listen_touchBegin, m_sWLRCursor, "WLRCursor");
     addWLSignal(&m_sWLRCursor->events.touch_up, &Events::listen_touchEnd, m_sWLRCursor, "WLRCursor");
     addWLSignal(&m_sWLRCursor->events.touch_motion, &Events::listen_touchUpdate, m_sWLRCursor, "WLRCursor");
+    addWLSignal(&m_sWLRCursor->events.touch_frame, &Events::listen_touchFrame, m_sWLRCursor, "WLRCursor");
+    addWLSignal(&m_sWLRCursor->events.hold_begin, &Events::listen_holdBegin, m_sWLRCursor, "WLRCursor");
+    addWLSignal(&m_sWLRCursor->events.hold_end, &Events::listen_holdEnd, m_sWLRCursor, "WLRCursor");
     addWLSignal(&m_sWLRBackend->events.new_input, &Events::listen_newInput, m_sWLRBackend, "Backend");
     addWLSignal(&m_sSeat.seat->events.request_set_cursor, &Events::listen_requestMouse, &m_sSeat, "Seat");
     addWLSignal(&m_sSeat.seat->events.request_set_selection, &Events::listen_requestSetSel, &m_sSeat, "Seat");
@@ -275,7 +278,7 @@ void CCompositor::startCompositor() {
     //
     Debug::log(LOG, "Creating the CHyprError!");
     g_pHyprError = std::make_unique<CHyprError>();
-    
+
     Debug::log(LOG, "Creating the KeybindManager!");
     g_pKeybindManager = std::make_unique<CKeybindManager>();
 
@@ -539,15 +542,27 @@ CWindow* CCompositor::vectorToWindowIdeal(const Vector2D& pos) {
                 if (resultSurf)
                     return w->get();
             }
-        } 
+        }
     }
 
     // first loop over floating cuz they're above, m_lWindows should be sorted bottom->top, for tiled it doesn't matter.
     for (auto w = m_vWindows.rbegin(); w != m_vWindows.rend(); w++) {
         wlr_box box = {(*w)->m_vRealPosition.vec().x, (*w)->m_vRealPosition.vec().y, (*w)->m_vRealSize.vec().x, (*w)->m_vRealSize.vec().y};
-        if ((*w)->m_bIsFloating && (*w)->m_bIsMapped && isWorkspaceVisible((*w)->m_iWorkspaceID) && !(*w)->m_bHidden && !(*w)->m_bX11ShouldntFocus && !(*w)->m_bPinned) {
-            if (wlr_box_contains_point(&box, m_sWLRCursor->x, m_sWLRCursor->y))
+        if ((*w)->m_bIsFloating && (*w)->m_bIsMapped && isWorkspaceVisible((*w)->m_iWorkspaceID) && !(*w)->m_bHidden && !(*w)->m_bPinned) {
+            // OR windows should add focus to parent
+            if ((*w)->m_bX11ShouldntFocus && (*w)->m_iX11Type != 2)
+                continue;
+
+            if (wlr_box_contains_point(&box, m_sWLRCursor->x, m_sWLRCursor->y)) {
+
+                if ((*w)->m_iX11Type == 2) {
+                    // Override Redirect
+                    return g_pCompositor->m_pLastWindow; // we kinda trick everything here. 
+                                                         // TODO: this is wrong, we should focus the parent, but idk how to get it considering it's nullptr in most cases.
+                }
+
                 return w->get();
+            }
 
             if (!(*w)->m_bIsX11) {
                 wlr_surface* resultSurf = nullptr;
@@ -558,7 +573,7 @@ CWindow* CCompositor::vectorToWindowIdeal(const Vector2D& pos) {
                 if (resultSurf)
                     return w->get();
             }
-        } 
+        }
     }
 
     // for windows, we need to check their extensions too, first.
@@ -646,7 +661,7 @@ wlr_surface* CCompositor::vectorWindowToSurface(const Vector2D& pos, CWindow* pW
     RASSERT(!pWindow->m_bIsX11, "Cannot call vectorWindowToSurface on an X11 window!");
 
     const auto PSURFACE = pWindow->m_uSurface.xdg;
-    
+
     double subx, suby;
 
     // calc for oversized windows... fucking bullshit, again.
@@ -744,7 +759,7 @@ void CCompositor::focusWindow(CWindow* pWindow, wlr_surface* pSurface) {
 
     g_pXWaylandManager->activateWindow(pWindow, true); // sets the m_pLastWindow
 
-    // do pointer focus too                                     
+    // do pointer focus too
     const auto POINTERLOCAL = g_pInputManager->getMouseCoordsInternal() - pWindow->m_vRealPosition.goalv();
     wlr_seat_pointer_notify_enter(m_sSeat.seat, PWINDOWSURFACE, POINTERLOCAL.x, POINTERLOCAL.y);
 
@@ -772,7 +787,7 @@ void CCompositor::focusSurface(wlr_surface* pSurface, CWindow* pWindowOwner) {
         g_pInputManager->m_sIMERelay.onKeyboardFocus(nullptr);
         return;
     }
-        
+
 
     const auto KEYBOARD = wlr_seat_get_keyboard(m_sSeat.seat);
 
@@ -862,7 +877,7 @@ bool CCompositor::isWorkspaceVisible(const int& w) {
     for (auto& m : m_vMonitors) {
         if (m->activeWorkspace == w)
             return true;
-        
+
         if (m->specialWorkspaceOpen && w == SPECIAL_WORKSPACE_ID)
             return true;
     }
@@ -1099,7 +1114,7 @@ CWindow* CCompositor::getWindowInDirection(CWindow* pWindow, char dir) {
         switch (dir) {
             case 'l':
                 if (STICKS(POSA.x, POSB.x + SIZEB.x)) {
-                    const auto INTERSECTLEN = std::max((double)0, std::min(POSA.y + SIZEA.y, POSB.y + SIZEB.y) - std::max(POSA.y, POSB.y));
+                    const auto INTERSECTLEN = std::max(0.0, std::min(POSA.y + SIZEA.y, POSB.y + SIZEB.y) - std::max(POSA.y, POSB.y));
                     if (INTERSECTLEN > longestIntersect) {
                         longestIntersect = INTERSECTLEN;
                         longestIntersectWindow = w.get();
@@ -1108,7 +1123,7 @@ CWindow* CCompositor::getWindowInDirection(CWindow* pWindow, char dir) {
                 break;
             case 'r':
                 if (STICKS(POSA.x + SIZEA.x, POSB.x)) {
-                    const auto INTERSECTLEN = std::max((double)0, std::min(POSA.y + SIZEA.y, POSB.y + SIZEB.y) - std::max(POSA.y, POSB.y));
+                    const auto INTERSECTLEN = std::max(0.0, std::min(POSA.y + SIZEA.y, POSB.y + SIZEB.y) - std::max(POSA.y, POSB.y));
                     if (INTERSECTLEN > longestIntersect) {
                         longestIntersect = INTERSECTLEN;
                         longestIntersectWindow = w.get();
@@ -1118,7 +1133,7 @@ CWindow* CCompositor::getWindowInDirection(CWindow* pWindow, char dir) {
             case 't':
             case 'u':
                 if (STICKS(POSA.y, POSB.y + SIZEB.y)) {
-                    const auto INTERSECTLEN = std::max((double)0, std::min(POSA.x + SIZEA.x, POSB.x + SIZEB.x) - std::max(POSA.x, POSB.x));
+                    const auto INTERSECTLEN = std::max(0.0, std::min(POSA.x + SIZEA.x, POSB.x + SIZEB.x) - std::max(POSA.x, POSB.x));
                     if (INTERSECTLEN > longestIntersect) {
                         longestIntersect = INTERSECTLEN;
                         longestIntersectWindow = w.get();
@@ -1128,7 +1143,7 @@ CWindow* CCompositor::getWindowInDirection(CWindow* pWindow, char dir) {
             case 'b':
             case 'd':
                 if (STICKS(POSA.y + SIZEA.y, POSB.y)) {
-                    const auto INTERSECTLEN = std::max((double)0, std::min(POSA.x + SIZEA.x, POSB.x + SIZEB.x) - std::max(POSA.x, POSB.x));
+                    const auto INTERSECTLEN = std::max(0.0, std::min(POSA.x + SIZEA.x, POSB.x + SIZEB.x) - std::max(POSA.x, POSB.x));
                     if (INTERSECTLEN > longestIntersect) {
                         longestIntersect = INTERSECTLEN;
                         longestIntersectWindow = w.get();
@@ -1151,7 +1166,7 @@ void CCompositor::deactivateAllWLRWorkspaces(wlr_ext_workspace_handle_v1* exclud
     }
 }
 
-CWindow* CCompositor::getNextWindowOnWorkspace(CWindow* pWindow) {
+CWindow* CCompositor::getNextWindowOnWorkspace(CWindow* pWindow, bool focusableOnly) {
     bool gotToWindow = false;
     for (auto& w : m_vWindows) {
         if (w.get() != pWindow && !gotToWindow)
@@ -1162,19 +1177,19 @@ CWindow* CCompositor::getNextWindowOnWorkspace(CWindow* pWindow) {
             continue;
         }
 
-        if (w->m_iWorkspaceID == pWindow->m_iWorkspaceID && w->m_bIsMapped && !w->m_bHidden)
+        if (w->m_iWorkspaceID == pWindow->m_iWorkspaceID && w->m_bIsMapped && !w->m_bHidden && (!focusableOnly || !w->m_bNoFocus))
             return w.get();
     }
 
     for (auto& w : m_vWindows) {
-        if (w.get() != pWindow && w->m_iWorkspaceID == pWindow->m_iWorkspaceID && w->m_bIsMapped && !w->m_bHidden)
+        if (w.get() != pWindow && w->m_iWorkspaceID == pWindow->m_iWorkspaceID && w->m_bIsMapped && !w->m_bHidden && (!focusableOnly || !w->m_bNoFocus))
             return w.get();
     }
 
     return nullptr;
 }
 
-CWindow* CCompositor::getPrevWindowOnWorkspace(CWindow* pWindow) {
+CWindow* CCompositor::getPrevWindowOnWorkspace(CWindow* pWindow, bool focusableOnly) {
     bool gotToWindow = false;
     for (auto it = m_vWindows.rbegin(); it != m_vWindows.rend(); it++) {
         if (it->get() != pWindow && !gotToWindow)
@@ -1185,12 +1200,12 @@ CWindow* CCompositor::getPrevWindowOnWorkspace(CWindow* pWindow) {
             continue;
         }
 
-        if ((*it)->m_iWorkspaceID == pWindow->m_iWorkspaceID && (*it)->m_bIsMapped && !(*it)->m_bHidden)
+        if ((*it)->m_iWorkspaceID == pWindow->m_iWorkspaceID && (*it)->m_bIsMapped && !(*it)->m_bHidden && (!focusableOnly || !(*it)->m_bNoFocus))
             return it->get();
     }
 
     for (auto it = m_vWindows.rbegin(); it != m_vWindows.rend(); it++) {
-        if (it->get() != pWindow && (*it)->m_iWorkspaceID == pWindow->m_iWorkspaceID && (*it)->m_bIsMapped && !(*it)->m_bHidden)
+        if (it->get() != pWindow && (*it)->m_iWorkspaceID == pWindow->m_iWorkspaceID && (*it)->m_bIsMapped && !(*it)->m_bHidden && (!focusableOnly || !(*it)->m_bNoFocus))
             return it->get();
     }
 
@@ -1274,7 +1289,7 @@ CMonitor* CCompositor::getMonitorInDirection(const char& dir) {
         switch (dir) {
             case 'l':
                 if (STICKS(POSA.x, POSB.x + SIZEB.x)) {
-                    const auto INTERSECTLEN = std::max((double)0, std::min(POSA.y + SIZEA.y, POSB.y + SIZEB.y) - std::max(POSA.y, POSB.y));
+                    const auto INTERSECTLEN = std::max(0.0, std::min(POSA.y + SIZEA.y, POSB.y + SIZEB.y) - std::max(POSA.y, POSB.y));
                     if (INTERSECTLEN > longestIntersect) {
                         longestIntersect = INTERSECTLEN;
                         longestIntersectMonitor = m.get();
@@ -1283,7 +1298,7 @@ CMonitor* CCompositor::getMonitorInDirection(const char& dir) {
                 break;
             case 'r':
                 if (STICKS(POSA.x + SIZEA.x, POSB.x)) {
-                    const auto INTERSECTLEN = std::max((double)0, std::min(POSA.y + SIZEA.y, POSB.y + SIZEB.y) - std::max(POSA.y, POSB.y));
+                    const auto INTERSECTLEN = std::max(0.0, std::min(POSA.y + SIZEA.y, POSB.y + SIZEB.y) - std::max(POSA.y, POSB.y));
                     if (INTERSECTLEN > longestIntersect) {
                         longestIntersect = INTERSECTLEN;
                         longestIntersectMonitor = m.get();
@@ -1293,7 +1308,7 @@ CMonitor* CCompositor::getMonitorInDirection(const char& dir) {
             case 't':
             case 'u':
                 if (STICKS(POSA.y, POSB.y + SIZEB.y)) {
-                    const auto INTERSECTLEN = std::max((double)0, std::min(POSA.x + SIZEA.x, POSB.x + SIZEB.x) - std::max(POSA.x, POSB.x));
+                    const auto INTERSECTLEN = std::max(0.0, std::min(POSA.x + SIZEA.x, POSB.x + SIZEB.x) - std::max(POSA.x, POSB.x));
                     if (INTERSECTLEN > longestIntersect) {
                         longestIntersect = INTERSECTLEN;
                         longestIntersectMonitor = m.get();
@@ -1303,7 +1318,7 @@ CMonitor* CCompositor::getMonitorInDirection(const char& dir) {
             case 'b':
             case 'd':
                 if (STICKS(POSA.y + SIZEA.y, POSB.y)) {
-                    const auto INTERSECTLEN = std::max((double)0, std::min(POSA.x + SIZEA.x, POSB.x + SIZEB.x) - std::max(POSA.x, POSB.x));
+                    const auto INTERSECTLEN = std::max(0.0, std::min(POSA.x + SIZEA.x, POSB.x + SIZEB.x) - std::max(POSA.x, POSB.x));
                     if (INTERSECTLEN > longestIntersect) {
                         longestIntersect = INTERSECTLEN;
                         longestIntersectMonitor = m.get();
@@ -1596,7 +1611,7 @@ bool CCompositor::workspaceIDOutOfBounds(const int& id) {
 
         if (w->m_iID < lowestID)
             lowestID = w->m_iID;
-        
+
         if (w->m_iID > highestID)
             highestID = w->m_iID;
     }
@@ -1613,10 +1628,19 @@ void CCompositor::setWindowFullscreen(CWindow* pWindow, bool on, eFullscreenMode
         return;
     }
 
+    const auto PMONITOR = getMonitorFromID(pWindow->m_iMonitorID);
+
+    const auto PWORKSPACE = getWorkspaceByID(pWindow->m_iWorkspaceID);
+
+    if (PWORKSPACE->m_bHasFullscreenWindow && on) {
+        Debug::log(LOG, "Rejecting fullscreen ON on a fullscreen workspace");
+        return;
+    }
+
     g_pLayoutManager->getCurrentLayout()->fullscreenRequestForWindow(pWindow, mode, on);
 
     g_pXWaylandManager->setWindowFullscreen(pWindow, pWindow->m_bIsFullscreen && mode == FULLSCREEN_FULL);
-    
+
     // make all windows on the same workspace under the fullscreen window
     for (auto& w : g_pCompositor->m_vWindows) {
         if (w->m_iWorkspaceID == pWindow->m_iWorkspaceID) {
@@ -1626,13 +1650,11 @@ void CCompositor::setWindowFullscreen(CWindow* pWindow, bool on, eFullscreenMode
         }
     }
 
-    const auto PMONITOR = getMonitorFromID(pWindow->m_iMonitorID);
-
     for (auto& ls : PMONITOR->m_aLayerSurfaceLists[ZWLR_LAYER_SHELL_V1_LAYER_TOP]) {
         if (!ls->fadingOut)
             ls->alpha = pWindow->m_bIsFullscreen && mode == FULLSCREEN_FULL ? 0.f : 255.f;
     }
-    
+
     g_pXWaylandManager->setWindowSize(pWindow, pWindow->m_vRealSize.goalv(), true);
 
     forceReportSizesToWindowsOnWorkspace(pWindow->m_iWorkspaceID);
@@ -1659,7 +1681,7 @@ CWindow* CCompositor::getX11Parent(CWindow* pWindow) {
         if (w->m_uSurface.xwayland == pWindow->m_uSurface.xwayland->parent)
             return w.get();
     }
-    
+
     return nullptr;
 }
 

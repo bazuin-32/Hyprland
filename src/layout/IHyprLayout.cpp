@@ -50,7 +50,7 @@ void IHyprLayout::onWindowCreatedFloating(CWindow* pWindow) {
             pWindow->m_bHidden = true;
             return;
         }
-        
+
         // reject any windows with size <= 5x5
         if (pWindow->m_vRealSize.goalv().x <= 5 || pWindow->m_vRealSize.goalv().y <= 5) {
             pWindow->m_vRealSize = PMONITOR->vecSize / 2.f;
@@ -202,12 +202,12 @@ void IHyprLayout::onMouseMove(const Vector2D& mousePos) {
             const auto MAXSIZE = g_pXWaylandManager->getMaxSizeForWindow(DRAGGINGWINDOW);
 
             if (*PANIMATE) {
-                DRAGGINGWINDOW->m_vRealSize = Vector2D(std::clamp(m_vBeginDragSizeXY.x + DELTA.x, (double)20, (double)MAXSIZE.x), std::clamp(m_vBeginDragSizeXY.y + DELTA.y, (double)20, (double)MAXSIZE.y));
+                DRAGGINGWINDOW->m_vRealSize = Vector2D(std::clamp(m_vBeginDragSizeXY.x + DELTA.x, 20.0, (double)MAXSIZE.x), std::clamp(m_vBeginDragSizeXY.y + DELTA.y, 20.0, (double)MAXSIZE.y));
             } else {
                 DRAGGINGWINDOW->m_vRealSize.setValueAndWarp(m_vBeginDragSizeXY + DELTA);
-                DRAGGINGWINDOW->m_vRealSize.setValueAndWarp(Vector2D(std::clamp(DRAGGINGWINDOW->m_vRealSize.vec().x, (double)20, (double)MAXSIZE.x), std::clamp(DRAGGINGWINDOW->m_vRealSize.vec().y, (double)20, (double)MAXSIZE.y)));
+                DRAGGINGWINDOW->m_vRealSize.setValueAndWarp(Vector2D(std::clamp(DRAGGINGWINDOW->m_vRealSize.vec().x, 20.0, (double)MAXSIZE.x), std::clamp(DRAGGINGWINDOW->m_vRealSize.vec().y, 20.0, (double)MAXSIZE.y)));
             }
-            
+
             g_pXWaylandManager->setWindowSize(DRAGGINGWINDOW, DRAGGINGWINDOW->m_vRealSize.goalv());
         } else {
             resizeActiveWindow(TICKDELTA, DRAGGINGWINDOW);
@@ -223,7 +223,7 @@ void IHyprLayout::onMouseMove(const Vector2D& mousePos) {
     if (PMONITOR) {
         DRAGGINGWINDOW->m_iMonitorID = PMONITOR->ID;
         DRAGGINGWINDOW->moveToWorkspace(PMONITOR->activeWorkspace);
-        
+
         DRAGGINGWINDOW->updateToplevel();
     }
 

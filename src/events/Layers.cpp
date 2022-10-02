@@ -133,8 +133,9 @@ void Events::listener_mapLayerSurface(void* owner, void* data) {
 
     g_pHyprRenderer->arrangeLayersForMonitor(PMONITOR->ID);
 
+    wlr_surface_send_enter(layersurface->layerSurface->surface, layersurface->layerSurface->output);
+
     if (layersurface->layerSurface->current.keyboard_interactive && (!g_pCompositor->m_sSeat.mouse || !g_pCompositor->m_sSeat.mouse->currentConstraint)) { // don't focus if constrained
-        wlr_surface_send_enter(layersurface->layerSurface->surface, layersurface->layerSurface->output);
         g_pCompositor->focusSurface(layersurface->layerSurface->surface);
 
         const auto LOCAL = g_pInputManager->getMouseCoordsInternal() - Vector2D(layersurface->geometry.x + PMONITOR->vecPosition.x, layersurface->geometry.y + PMONITOR->vecPosition.y);
@@ -244,7 +245,7 @@ void Events::listener_commitLayerSurface(void* owner, void* data) {
 
     if (layersurface->layerSurface->current.committed != 0) {
         if (layersurface->layer != layersurface->layerSurface->current.layer) {
-            
+
             for (auto it = PMONITOR->m_aLayerSurfaceLists[layersurface->layer].begin(); it != PMONITOR->m_aLayerSurfaceLists[layersurface->layer].end(); it++) {
                 if (it->get() == layersurface) {
                     PMONITOR->m_aLayerSurfaceLists[layersurface->layerSurface->current.layer].emplace_back(std::move(*it));

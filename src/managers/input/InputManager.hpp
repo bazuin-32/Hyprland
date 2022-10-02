@@ -29,7 +29,7 @@ public:
     void            onMouseMoved(wlr_pointer_motion_event*);
     void            onMouseWarp(wlr_pointer_motion_absolute_event*);
     void            onMouseButton(wlr_pointer_button_event*);
-    void            onMouseWheel(wlr_pointer_axis_event*); 
+    void            onMouseWheel(wlr_pointer_axis_event*);
     void            onKeyboardKey(wlr_keyboard_key_event*, SKeyboard*);
     void            onKeyboardMod(void*, SKeyboard*);
 
@@ -62,6 +62,9 @@ public:
     void            onTouchDown(wlr_touch_down_event*);
     void            onTouchUp(wlr_touch_up_event*);
     void            onTouchMove(wlr_touch_motion_event*);
+
+    void            onPointerHoldBegin(wlr_pointer_hold_begin_event*);
+    void            onPointerHoldEnd(wlr_pointer_hold_end_event*);
 
     STouchData      m_sTouchData;
 
