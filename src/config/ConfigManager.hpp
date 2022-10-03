@@ -70,6 +70,48 @@ struct SAnimationPropertyConfig {
     SAnimationPropertyConfig* pParentAnimation = nullptr;
 };
 
+class CVarList {
+public:
+    CVarList(const std::string& in, long unsigned int lastArgNo = 0) {
+        std::string curitem = "";
+        std::string argZ = in;
+
+        auto nextItem = [&]() {
+            auto idx = lastArgNo != 0 && m_vArgs.size() >= lastArgNo - 1 ? std::string::npos : argZ.find_first_of(',');
+
+            if (idx != std::string::npos) {
+                curitem = argZ.substr(0, idx);
+                argZ = argZ.substr(idx + 1);
+            } else {
+                curitem = argZ;
+                argZ = STRVAL_EMPTY;
+            }
+        };
+
+        nextItem();
+
+        while (curitem != STRVAL_EMPTY) {
+            m_vArgs.push_back(removeBeginEndSpacesTabs(curitem));
+            nextItem();
+        }
+    };
+
+    ~CVarList() = default;
+
+    int size() const {
+        return m_vArgs.size();
+    }
+
+    std::string operator[](const long unsigned int& idx) const {
+        if (idx >= m_vArgs.size())
+            return "";
+        return m_vArgs[idx];
+    }
+
+private:
+    std::vector<std::string> m_vArgs;
+};
+
 class CConfigManager {
 public:
     CConfigManager();
