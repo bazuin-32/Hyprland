@@ -125,6 +125,7 @@ void CConfigManager::setDefaultVars() {
     configValues["animations:workspaces"].intValue = 1;
 
     configValues["input:sensitivity"].floatValue = 0.f;
+    configValues["input:accel_profile"].strValue = STRVAL_EMPTY;
     configValues["input:kb_file"].strValue = STRVAL_EMPTY;
     configValues["input:kb_layout"].strValue = "us";
     configValues["input:kb_variant"].strValue = STRVAL_EMPTY;
@@ -137,12 +138,15 @@ void CConfigManager::setDefaultVars() {
     configValues["input:numlock_by_default"].intValue = 0;
     configValues["input:force_no_accel"].intValue = 0;
     configValues["input:float_switch_override_focus"].intValue = 1;
+    configValues["input:left_handed"].intValue = 0;
+    configValues["input:scroll_method"].strValue = STRVAL_EMPTY;
     configValues["input:touchpad:natural_scroll"].intValue = 0;
     configValues["input:touchpad:disable_while_typing"].intValue = 1;
     configValues["input:touchpad:clickfinger_behavior"].intValue = 0;
     configValues["input:touchpad:middle_button_emulation"].intValue = 0;
     configValues["input:touchpad:tap-to-click"].intValue = 1;
     configValues["input:touchpad:drag_lock"].intValue = 0;
+    configValues["input:touchpad:scroll_factor"].floatValue = 1.f;
 
     configValues["binds:pass_mouse_when_bound"].intValue = 0;
     configValues["binds:scroll_event_delay"].intValue = 300;
@@ -165,6 +169,7 @@ void CConfigManager::setDeviceDefaultVars(const std::string& dev) {
     auto& cfgValues = deviceConfigs[dev];
 
     cfgValues["sensitivity"].floatValue = 0.f;
+    cfgValues["accel_profile"].strValue = STRVAL_EMPTY;
     cfgValues["kb_file"].strValue = STRVAL_EMPTY;
     cfgValues["kb_layout"].strValue = "us";
     cfgValues["kb_variant"].strValue = STRVAL_EMPTY;
@@ -180,6 +185,8 @@ void CConfigManager::setDeviceDefaultVars(const std::string& dev) {
     cfgValues["middle_button_emulation"].intValue = 0;
     cfgValues["tap-to-click"].intValue = 1;
     cfgValues["drag_lock"].intValue = 0;
+    cfgValues["left_handed"].intValue = 0;
+    cfgValues["scroll_method"].strValue = STRVAL_EMPTY;
 }
 
 void CConfigManager::setDefaultAnimationVars() {
@@ -373,6 +380,11 @@ void CConfigManager::handleRawExec(const std::string& command, const std::string
     if (child == 0) {
         // run in child
         grandchild = fork();
+
+        sigset_t set;
+        sigemptyset(&set);
+        sigprocmask(SIG_SETMASK, &set, NULL);
+
         if (grandchild == 0) {
             // run in grandchild
             close(socket[0]);
@@ -705,6 +717,7 @@ bool windowRuleValid(const std::string& RULE) {
         && RULE.find("opacity") != 0
         && RULE.find("move") != 0
         && RULE.find("size") != 0
+        && RULE.find("minsize") != 0
         && RULE.find("pseudo") != 0
         && RULE.find("monitor") != 0
         && RULE != "nofocus"
@@ -714,6 +727,7 @@ bool windowRuleValid(const std::string& RULE) {
         && RULE != "forceinput"
         && RULE != "fullscreen"
         && RULE != "pin"
+        && RULE != "noanim"
         && RULE.find("animation") != 0
         && RULE.find("rounding") != 0
         && RULE.find("workspace") != 0);
@@ -1124,7 +1138,7 @@ void CConfigManager::loadConfigLoadVars() {
     // Update the keyboard layout to the cfg'd one if this is not the first launch
     if (!isFirstLaunch) {
         g_pInputManager->setKeyboardLayout();
-        g_pInputManager->setMouseConfigs();
+        g_pInputManager->setPointerConfigs();
     }
 
     // Calculate the internal vars
@@ -1294,11 +1308,11 @@ void CConfigManager::setString(std::string v, std::string val) {
     configValues[v].strValue = val;
 }
 
-SMonitorRule CConfigManager::getMonitorRuleFor(std::string name) {
+SMonitorRule CConfigManager::getMonitorRuleFor(std::string name, std::string displayName) {
     SMonitorRule* found = nullptr;
 
     for (auto& r : m_dMonitorRules) {
-        if (r.name == name) {
+        if (r.name == name || (r.name.find("desc:") == 0 && (r.name.substr(5) == displayName || r.name.substr(5) == removeBeginEndSpacesTabs(displayName.substr(0, displayName.find_first_of('(')))))) {
             found = &r;
             break;
         }
@@ -1409,7 +1423,7 @@ void CConfigManager::dispatchExecOnce() {
 
     // set input, fixes some certain issues
     g_pInputManager->setKeyboardLayout();
-    g_pInputManager->setMouseConfigs();
+    g_pInputManager->setPointerConfigs();
 
     // set ws names again
     for (auto& ws : g_pCompositor->m_vWorkspaces) {
@@ -1422,7 +1436,7 @@ void CConfigManager::performMonitorReload() {
     bool overAgain = false;
 
     for (auto& m : g_pCompositor->m_vRealMonitors) {
-        auto rule = getMonitorRuleFor(m->szName);
+        auto rule = getMonitorRuleFor(m->szName, m->output->description ? m->output->description : "");
 
         // ensure mirror
         m->setMirror(rule.mirrorOf);
@@ -1475,7 +1489,7 @@ bool CConfigManager::shouldBlurLS(const std::string& ns) {
 
 void CConfigManager::ensureDPMS() {
     for (auto& rm : g_pCompositor->m_vRealMonitors) {
-        auto rule = getMonitorRuleFor(rm->szName);
+        auto rule = getMonitorRuleFor(rm->szName, rm->output->description ? rm->output->description : "");
 
         if (rule.disabled == rm->m_bEnabled) {
 	        rm->m_pThisWrap = &rm;

@@ -202,9 +202,9 @@ bool CKeybindManager::onKeyEvent(wlr_keyboard_key_event* e, SKeyboard* pKeyboard
         m_dPressedKeycodes.push_back(KEYCODE);
         m_dPressedKeysyms.push_back(keysym);
 
-        found = g_pKeybindManager->handleKeybinds(MODS, "", keysym, 0, true, e->time_msec) || found;
+        found = handleKeybinds(MODS, "", keysym, 0, true, e->time_msec) || found;
 
-        found = g_pKeybindManager->handleKeybinds(MODS, "", 0, KEYCODE, true, e->time_msec) || found;
+        found = handleKeybinds(MODS, "", 0, KEYCODE, true, e->time_msec) || found;
 
         if (found)
             shadowKeybinds(keysym, KEYCODE);
@@ -219,9 +219,9 @@ bool CKeybindManager::onKeyEvent(wlr_keyboard_key_event* e, SKeyboard* pKeyboard
         m_dPressedKeycodes.erase(std::remove(m_dPressedKeycodes.begin(), m_dPressedKeycodes.end(), KEYCODE), m_dPressedKeycodes.end());
         m_dPressedKeysyms.erase(std::remove(m_dPressedKeysyms.begin(), m_dPressedKeysyms.end(), keysym), m_dPressedKeysyms.end());
 
-        found = g_pKeybindManager->handleKeybinds(MODS, "", keysym, 0, false, e->time_msec) || found;
+        found = handleKeybinds(MODS, "", keysym, 0, false, e->time_msec) || found;
 
-        found = g_pKeybindManager->handleKeybinds(MODS, "", 0, KEYCODE, false, e->time_msec) || found;
+        found = handleKeybinds(MODS, "", 0, KEYCODE, false, e->time_msec) || found;
 
         shadowKeybinds();
     }
@@ -244,9 +244,9 @@ bool CKeybindManager::onAxisEvent(wlr_pointer_axis_event* e) {
     bool found = false;
     if (e->source == WLR_AXIS_SOURCE_WHEEL && e->orientation == WLR_AXIS_ORIENTATION_VERTICAL) {
         if (e->delta < 0) {
-            found = g_pKeybindManager->handleKeybinds(MODS, "mouse_down", 0, 0, true, 0);
+            found = handleKeybinds(MODS, "mouse_down", 0, 0, true, 0);
         } else {
-            found = g_pKeybindManager->handleKeybinds(MODS, "mouse_up", 0, 0, true, 0);
+            found = handleKeybinds(MODS, "mouse_up", 0, 0, true, 0);
         }
 
         if (found)
@@ -268,17 +268,21 @@ bool CKeybindManager::onMouseEvent(wlr_pointer_button_event* e) {
     bool mouseBindWasActive = ensureMouseBindState();
 
     if (e->state == WLR_BUTTON_PRESSED) {
-        found = g_pKeybindManager->handleKeybinds(MODS, "mouse:" + std::to_string(e->button), 0, 0, true, 0);
+        found = handleKeybinds(MODS, "mouse:" + std::to_string(e->button), 0, 0, true, 0);
 
         if (found)
             shadowKeybinds();
     } else {
-        found = g_pKeybindManager->handleKeybinds(MODS, "mouse:" + std::to_string(e->button), 0, 0, false, 0);
+        found = handleKeybinds(MODS, "mouse:" + std::to_string(e->button), 0, 0, false, 0);
 
         shadowKeybinds();
     }
 
     return !found && !mouseBindWasActive;
+}
+
+void CKeybindManager::onSwitchEvent(const std::string& switchName) {
+    handleKeybinds(0, "switch:" + switchName, 0, 0, true, 0);
 }
 
 int repeatKeyHandler(void* data) {
@@ -419,10 +423,29 @@ bool CKeybindManager::handleVT(xkb_keysym_t keysym) {
     if (!(keysym >= XKB_KEY_XF86Switch_VT_1 && keysym <= XKB_KEY_XF86Switch_VT_12))
         return false;
 
-    const auto PSESSION = wlr_backend_get_session(g_pCompositor->m_sWLRBackend);
-    if (PSESSION) {
-        const int TTY = keysym - XKB_KEY_XF86Switch_VT_1 + 1;
-        wlr_session_change_vt(PSESSION, TTY);
+    // beyond this point, return true to not handle anything else.
+    // we'll avoid printing shit to active windows.
+
+    if (g_pCompositor->m_sWLRSession) {
+        const unsigned int TTY = keysym - XKB_KEY_XF86Switch_VT_1 + 1;
+
+        // vtnr is bugged for some reason.
+        const std::string TTYSTR = execAndGet("head -n 1 /sys/devices/virtual/tty/tty0/active").substr(3);
+        unsigned int ttynum = 0;
+        try {
+            ttynum = std::stoll(TTYSTR);
+        } catch (std::exception &e) {
+            ; // oops?
+        }
+
+        if (ttynum == TTY)
+            return true;
+
+        Debug::log(LOG, "Switching from VT %i to VT %i", ttynum, TTY);
+
+        if (!wlr_session_change_vt(g_pCompositor->m_sWLRSession, TTY))
+            return true; // probably same session
+
         g_pCompositor->m_bSessionActive = false;
 
         for (auto& m : g_pCompositor->m_vMonitors) {
@@ -435,7 +458,7 @@ bool CKeybindManager::handleVT(xkb_keysym_t keysym) {
         return true;
     }
 
-    return false;
+    return true;
 }
 
 bool CKeybindManager::handleInternalKeybinds(xkb_keysym_t keysym) {
@@ -480,6 +503,11 @@ void CKeybindManager::spawn(std::string args) {
     }
     if (child == 0) {
         // run in child
+
+        sigset_t set;
+        sigemptyset(&set);
+        sigprocmask(SIG_SETMASK, &set, NULL);
+
         grandchild = fork();
         if (grandchild == 0) {
             // run in grandchild
@@ -616,12 +644,20 @@ void CKeybindManager::changeworkspace(std::string args) {
 
     if (*PBACKANDFORTH && PCURRENTWORKSPACE->m_iID == workspaceToChangeTo && PCURRENTWORKSPACE->m_iPrevWorkspaceID != -1 && !internal) {
 
+        const auto PPREVWORKSPACE = g_pCompositor->getWorkspaceByID(PCURRENTWORKSPACE->m_iPrevWorkspaceID);
+
         workspaceToChangeTo = PCURRENTWORKSPACE->m_iPrevWorkspaceID;
+        
+        if (PPREVWORKSPACE)
+            workspaceName = PPREVWORKSPACE->m_szName;
+        else
+            workspaceName = std::to_string(workspaceToChangeTo);
+
         isSwitchingToPrevious = true;
 
         // If the previous workspace ID isn't reset, cycles can form when continually going
         // to the previous workspace again and again.
-        static auto *const PALLOWWORKSPACECYCLES = &g_pConfigManager->getConfigValuePtr("binds:allow_workspace_cycles")->intValue;
+        static auto* const PALLOWWORKSPACECYCLES = &g_pConfigManager->getConfigValuePtr("binds:allow_workspace_cycles")->intValue;
         if (!*PALLOWWORKSPACECYCLES)
             PCURRENTWORKSPACE->m_iPrevWorkspaceID = -1;
 
@@ -1324,7 +1360,7 @@ void CKeybindManager::forceRendererReload(std::string args) {
     bool overAgain = false;
 
     for (auto& m : g_pCompositor->m_vMonitors) {
-        auto rule = g_pConfigManager->getMonitorRuleFor(m->szName);
+        auto rule = g_pConfigManager->getMonitorRuleFor(m->szName, m->output->description ? m->output->description : "");
         if (!g_pHyprRenderer->applyMonitorRule(m.get(), &rule, true)) {
             overAgain = true;
             break;
@@ -1560,10 +1596,21 @@ void CKeybindManager::toggleOpaque(std::string unused) {
 }
 
 void CKeybindManager::dpms(std::string arg) {
-    bool enable = arg == "on";
+    bool enable = arg.find("on") == 0;
+    std::string port = "";
+
+    if (arg.find_first_of(' ') != std::string::npos) {
+        port = arg.substr(arg.find_first_of(' ') + 1);
+    }
 
     for (auto& m : g_pCompositor->m_vMonitors) {
+
+        if (!port.empty() && m->szName != port)
+            continue;
+
         wlr_output_enable(m->output, enable);
+
+        m->dpmsStatus = enable;
 
         if (!wlr_output_commit(m->output)) {
             Debug::log(ERR, "Couldn't commit output %s", m->szName.c_str());
@@ -1640,7 +1687,7 @@ void CKeybindManager::mouse(std::string args) {
         if (PRESSED) {
             g_pKeybindManager->m_bIsMouseBindActive = true;
 
-            g_pInputManager->currentlyDraggedWindow = g_pCompositor->windowFromCursor();
+            g_pInputManager->currentlyDraggedWindow = g_pCompositor->vectorToWindowIdeal(g_pInputManager->getMouseCoordsInternal());
             g_pInputManager->dragMode = MBIND_MOVE;
 
             g_pLayoutManager->getCurrentLayout()->onBeginDragWindow();
@@ -1657,7 +1704,7 @@ void CKeybindManager::mouse(std::string args) {
         if (PRESSED) {
             g_pKeybindManager->m_bIsMouseBindActive = true;
 
-            g_pInputManager->currentlyDraggedWindow = g_pCompositor->windowFromCursor();
+            g_pInputManager->currentlyDraggedWindow = g_pCompositor->vectorToWindowIdeal(g_pInputManager->getMouseCoordsInternal());
             g_pInputManager->dragMode = MBIND_RESIZE;
 
             g_pLayoutManager->getCurrentLayout()->onBeginDragWindow();

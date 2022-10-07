@@ -435,12 +435,17 @@ void CInputManager::processMouseDownKill(wlr_pointer_button_event* e) {
 }
 
 void CInputManager::onMouseWheel(wlr_pointer_axis_event* e) {
+    static auto *const PSCROLLFACTOR = &g_pConfigManager->getConfigValuePtr("input:touchpad:scroll_factor")->floatValue;
+
+    auto factor = (*PSCROLLFACTOR <= 0.f || e->source != WLR_AXIS_SOURCE_FINGER ? 1.f : *PSCROLLFACTOR);
+
     bool passEvent = g_pKeybindManager->onAxisEvent(e);
 
     wlr_idle_notify_activity(g_pCompositor->m_sWLRIdle, g_pCompositor->m_sSeat.seat);
 
     if (passEvent) {
-        wlr_seat_pointer_notify_axis(g_pCompositor->m_sSeat.seat, e->time_msec, e->orientation, e->delta, e->delta_discrete, e->source);
+        wlr_seat_pointer_notify_axis(g_pCompositor->m_sSeat.seat, e->time_msec, e->orientation, factor * e->delta,
+            std::round(factor * e->delta_discrete), e->source);
     }
 }
 
@@ -662,7 +667,7 @@ void CInputManager::newMouse(wlr_input_device* mouse, bool virt) {
         Debug::log(LOG, "New mouse has libinput sens %.2f (%.2f) with accel profile %i (%i)", libinput_device_config_accel_get_speed(LIBINPUTDEV), libinput_device_config_accel_get_default_speed(LIBINPUTDEV), libinput_device_config_accel_get_profile(LIBINPUTDEV), libinput_device_config_accel_get_default_profile(LIBINPUTDEV));
     }
 
-    setMouseConfigs();
+    setPointerConfigs();
 
     PMOUSE->hyprListener_destroyMouse.initCallback(&mouse->events.destroy, &Events::listener_destroyMouse, PMOUSE, "Mouse");
 
@@ -675,11 +680,11 @@ void CInputManager::newMouse(wlr_input_device* mouse, bool virt) {
     Debug::log(LOG, "New mouse created, pointer WLR: %x", mouse);
 }
 
-void CInputManager::setMouseConfigs() {
+void CInputManager::setPointerConfigs() {
     for (auto& m : m_lMice) {
-        const auto PMOUSE = &m;
+        const auto PPOINTER = &m;
 
-        auto devname = PMOUSE->name;
+        auto devname = PPOINTER->name;
         transform(devname.begin(), devname.end(), devname.begin(), ::tolower);
 
         const auto HASCONFIG = g_pConfigManager->deviceConfigExists(devname);
@@ -692,11 +697,31 @@ void CInputManager::setMouseConfigs() {
             else
                 libinput_device_config_click_set_method(LIBINPUTDEV, LIBINPUT_CONFIG_CLICK_METHOD_CLICKFINGER);
 
+            if ((HASCONFIG ? g_pConfigManager->getDeviceInt(devname, "left_handed") : g_pConfigManager->getInt("input:left_handed")) == 0)
+                libinput_device_config_left_handed_set(LIBINPUTDEV, 0);
+            else
+                libinput_device_config_left_handed_set(LIBINPUTDEV, 1);
+
             if (libinput_device_config_middle_emulation_is_available(LIBINPUTDEV)) {  // middleclick on r+l mouse button pressed
                 if ((HASCONFIG ? g_pConfigManager->getDeviceInt(devname, "middle_button_emulation") : g_pConfigManager->getInt("input:touchpad:middle_button_emulation")) == 1)
                     libinput_device_config_middle_emulation_set_enabled(LIBINPUTDEV, LIBINPUT_CONFIG_MIDDLE_EMULATION_ENABLED);
                 else
                     libinput_device_config_middle_emulation_set_enabled(LIBINPUTDEV, LIBINPUT_CONFIG_MIDDLE_EMULATION_DISABLED);
+            }
+
+            const auto SCROLLMETHOD = HASCONFIG ? g_pConfigManager->getDeviceString(devname, "scroll_method") : g_pConfigManager->getString("input:scroll_method");
+            if (SCROLLMETHOD == "" || SCROLLMETHOD == STRVAL_EMPTY) {
+                libinput_device_config_scroll_set_method(LIBINPUTDEV, libinput_device_config_scroll_get_default_method(LIBINPUTDEV));
+            } else if (SCROLLMETHOD == "no_scroll") {
+                libinput_device_config_scroll_set_method(LIBINPUTDEV, LIBINPUT_CONFIG_SCROLL_NO_SCROLL);
+            } else if (SCROLLMETHOD == "2fg") {
+                libinput_device_config_scroll_set_method(LIBINPUTDEV, LIBINPUT_CONFIG_SCROLL_2FG);
+            } else if (SCROLLMETHOD == "edge") {
+                libinput_device_config_scroll_set_method(LIBINPUTDEV, LIBINPUT_CONFIG_SCROLL_EDGE);
+            } else if (SCROLLMETHOD == "on_button_down") {
+                libinput_device_config_scroll_set_method(LIBINPUTDEV, LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN);
+            } else {
+                Debug::log(WARN, "Scroll method unknown");
             }
 
             if ((HASCONFIG ? g_pConfigManager->getDeviceInt(devname, "drag_lock") : g_pConfigManager->getInt("input:touchpad:drag_lock")) == 0)
@@ -723,9 +748,19 @@ void CInputManager::setMouseConfigs() {
             }
 
             const auto LIBINPUTSENS = std::clamp((HASCONFIG ? g_pConfigManager->getDeviceFloat(devname, "sensitivity") : g_pConfigManager->getFloat("input:sensitivity")), -1.f, 1.f);
-
-            libinput_device_config_accel_set_profile(LIBINPUTDEV, LIBINPUT_CONFIG_ACCEL_PROFILE_NONE);
             libinput_device_config_accel_set_speed(LIBINPUTDEV, LIBINPUTSENS);
+
+            const auto ACCELPROFILE = HASCONFIG ? g_pConfigManager->getDeviceString(devname, "accel_profile") : g_pConfigManager->getString("input:accel_profile");
+
+            if (ACCELPROFILE == "" || ACCELPROFILE == STRVAL_EMPTY) {
+                libinput_device_config_accel_set_profile(LIBINPUTDEV, libinput_device_config_accel_get_default_profile(LIBINPUTDEV));
+            } else if (ACCELPROFILE == "adaptive") {
+                libinput_device_config_accel_set_profile(LIBINPUTDEV, LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE);
+            } else if (ACCELPROFILE == "flat") {
+                libinput_device_config_accel_set_profile(LIBINPUTDEV, LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT);
+            } else {
+                Debug::log(WARN, "Unknown acceleration profile, falling back to default");
+            } 
 
             Debug::log(LOG, "Applied config to mouse %s, sens %.2f", m.name.c_str(), LIBINPUTSENS);
         }
@@ -1005,4 +1040,30 @@ void CInputManager::destroyTouchDevice(STouchDevice* pDevice) {
     Debug::log(LOG, "Touch device at %x removed", pDevice);
 
     m_lTouchDevices.remove(*pDevice);
+}
+
+void CInputManager::newSwitch(wlr_input_device* pDevice) {
+    const auto PNEWDEV = &m_lSwitches.emplace_back();
+    PNEWDEV->pWlrDevice = pDevice;
+
+    Debug::log(LOG, "New switch with name \"%s\" added", pDevice->name);
+
+    PNEWDEV->hyprListener_destroy.initCallback(&pDevice->events.destroy, [&](void* owner, void* data) {
+        destroySwitch((SSwitchDevice*)owner);
+    }, PNEWDEV, "SwitchDevice");
+
+    const auto PSWITCH = wlr_switch_from_input_device(pDevice);
+
+    PNEWDEV->hyprListener_toggle.initCallback(&PSWITCH->events.toggle, [&](void* owner, void* data) {
+        const auto PDEVICE = (SSwitchDevice*)owner;
+        const auto NAME = std::string(PDEVICE->pWlrDevice->name);
+
+        Debug::log(LOG, "Switch %s fired, triggering binds.", NAME.c_str());
+
+        g_pKeybindManager->onSwitchEvent(NAME);
+    }, PNEWDEV, "SwitchDevice");
+}
+
+void CInputManager::destroySwitch(SSwitchDevice* pDevice) {
+    m_lSwitches.remove(*pDevice);
 }

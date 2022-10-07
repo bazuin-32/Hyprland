@@ -166,6 +166,8 @@ void Events::listener_mapWindow(void* owner, void* data) {
             PWINDOW->m_sAdditionalConfigData.forceAllowsInput = true;
         } else if (r.szRule == "pin") {
             PWINDOW->m_bPinned = true;
+        } else if (r.szRule == "noanim") {
+            PWINDOW->m_sAdditionalConfigData.forceNoAnims = true;
         } else if (r.szRule.find("rounding") == 0) {
             try {
                 PWINDOW->m_sAdditionalConfigData.rounding = std::stoi(r.szRule.substr(r.szRule.find_first_of(' ') + 1));
@@ -248,6 +250,21 @@ void Events::listener_mapWindow(void* owner, void* data) {
                     PWINDOW->m_bHidden = false;
                 } catch (...) {
                     Debug::log(LOG, "Rule size failed, rule: %s -> %s", r.szRule.c_str(), r.szValue.c_str());
+                }
+            } else if (r.szRule.find("minsize") == 0) {
+                try {
+                    const auto VALUE = r.szRule.substr(r.szRule.find(" ") + 1);
+                    const auto SIZEXSTR = VALUE.substr(0, VALUE.find(" "));
+                    const auto SIZEYSTR = VALUE.substr(VALUE.find(" ") + 1);
+
+                    const auto SIZE = Vector2D(std::max((double)std::stoll(SIZEXSTR), PWINDOW->m_vRealSize.goalv().x), std::max((double)std::stoll(SIZEYSTR), PWINDOW->m_vRealSize.goalv().y));
+
+                    PWINDOW->m_vRealSize = SIZE;
+                    g_pXWaylandManager->setWindowSize(PWINDOW, PWINDOW->m_vRealSize.goalv());
+
+                    PWINDOW->m_bHidden = false;
+                } catch (...) {
+                    Debug::log(LOG, "Rule minsize failed, rule: %s -> %s", r.szRule.c_str(), r.szValue.c_str());
                 }
             } else if (r.szRule.find("move") == 0) {
                 try {
@@ -380,67 +397,59 @@ void Events::listener_mapWindow(void* owner, void* data) {
 
     // verify swallowing
     if (*PSWALLOW) {
-        // check parent
-        int ppid = getPPIDof(PWINDOW->getPID());
+        // don't swallow ourselves
+        std::regex rgx(*PSWALLOWREGEX);
+        if (!std::regex_match(g_pXWaylandManager->getAppIDClass(PWINDOW), rgx)) {
+            // check parent
+            int ppid = getPPIDof(PWINDOW->getPID());
 
-        const auto PPPID = getPPIDof(ppid);
+            int curppid = 0;
 
-        // why? no clue. Blame terminals.
-        if (PPPID > 2) {
-            ppid = PPPID;
-        }
+            for (int i = 0; i < 5; ++i) {
+                curppid = getPPIDof(ppid);
 
-        if (ppid) {
-            // get window by pid
-            std::vector<CWindow*> found;
-            CWindow* finalFound = nullptr;
-            for (auto& w : g_pCompositor->m_vWindows) {
-                if (!w->m_bIsMapped || w->m_bHidden)
-                    continue;
-
-                if (w->getPID() == ppid) {
-                    found.push_back(w.get());
+                if (curppid < 10) {
+                    break;
                 }
+
+                ppid = curppid;
             }
 
-            if (found.size() > 1) {
-                for (auto& w : found) {
-                    // try get the focus
-                    if (w == PFOCUSEDWINDOWPREV) {
-                        finalFound = w;
-                        break;
+            if (ppid) {
+                // get window by pid
+                std::vector<CWindow*> found;
+                CWindow* finalFound = nullptr;
+                for (auto& w : g_pCompositor->m_vWindows) {
+                    if (!w->m_bIsMapped || w->m_bHidden)
+                        continue;
+
+                    if (w->getPID() == ppid) {
+                        found.push_back(w.get());
                     }
                 }
 
-                if (!finalFound) {
-                    // just get the closest (ws)
+                if (found.size() > 1) {
                     for (auto& w : found) {
-                        if (w->m_iWorkspaceID == g_pCompositor->m_pLastMonitor->activeWorkspace) {
+                        // try get the focus, otherwise we'll ignore to avoid swallowing incorrect windows
+                        if (w == PFOCUSEDWINDOWPREV) {
                             finalFound = w;
                             break;
                         }
                     }
-                }
-
-                if (!finalFound) {
-                    // what, just use 0
+                } else if (found.size() == 1) {
                     finalFound = found[0];
                 }
 
-            } else if (found.size() == 1) {
-                finalFound = found[0];
-            }
+                if (finalFound) {
+                    // check if it's the window we want
+                    if (std::regex_match(g_pXWaylandManager->getAppIDClass(finalFound), rgx)) {
+                        // swallow
+                        PWINDOW->m_pSwallowed = finalFound;
 
-            if (finalFound) {
-                // check if it's the window we want
-                std::regex rgx(*PSWALLOWREGEX);
-                if (std::regex_match(g_pXWaylandManager->getAppIDClass(finalFound), rgx)) {
-                    // swallow
-                    PWINDOW->m_pSwallowed = finalFound;
+                        g_pLayoutManager->getCurrentLayout()->onWindowRemoved(finalFound);
 
-                    g_pLayoutManager->getCurrentLayout()->onWindowRemoved(finalFound);
-
-                    finalFound->m_bHidden = true;
+                        finalFound->m_bHidden = true;
+                    }
                 }
             }
         }

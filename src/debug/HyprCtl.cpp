@@ -23,6 +23,7 @@ std::string monitorsRequest(HyprCtl::eHyprCtlOutputFormat format) {
 R"#({
     "id": %i,
     "name": "%s",
+    "description": "%s",
     "width": %i,
     "height": %i,
     "refreshRate": %f,
@@ -35,10 +36,12 @@ R"#({
     "reserved": [%i, %i, %i, %i],
     "scale": %.2f,
     "transform": %i,
-    "focused": %s
+    "focused": %s,
+    "dpmsStatus": %s
 },)#",
                 m->ID,
                 escapeJSONStrings(m->szName).c_str(),
+                escapeJSONStrings(m->output->description ? m->output->description : "").c_str(),
                 (int)m->vecPixelSize.x, (int)m->vecPixelSize.y,
                 m->refreshRate,
                 (int)m->vecPosition.x, (int)m->vecPosition.y,
@@ -46,7 +49,8 @@ R"#({
                 (int)m->vecReservedTopLeft.x, (int)m->vecReservedTopLeft.y, (int)m->vecReservedBottomRight.x, (int)m->vecReservedBottomRight.y,
                 m->scale,
                 (int)m->transform,
-                (m.get() == g_pCompositor->m_pLastMonitor ? "true" : "false")
+                (m.get() == g_pCompositor->m_pLastMonitor ? "true" : "false"),
+                (m->dpmsStatus ? "true" : "false")
             );
         }
 
@@ -56,8 +60,8 @@ R"#({
         result += "]";
     } else {
         for (auto& m : g_pCompositor->m_vMonitors) {
-            result += getFormat("Monitor %s (ID %i):\n\t%ix%i@%f at %ix%i\n\tactive workspace: %i (%s)\n\treserved: %i %i %i %i\n\tscale: %.2f\n\ttransform: %i\n\tfocused: %s\n\n",
-                                m->szName.c_str(), m->ID, (int)m->vecPixelSize.x, (int)m->vecPixelSize.y, m->refreshRate, (int)m->vecPosition.x, (int)m->vecPosition.y, m->activeWorkspace, g_pCompositor->getWorkspaceByID(m->activeWorkspace)->m_szName.c_str(), (int)m->vecReservedTopLeft.x, (int)m->vecReservedTopLeft.y, (int)m->vecReservedBottomRight.x, (int)m->vecReservedBottomRight.y, m->scale, (int)m->transform, (m.get() == g_pCompositor->m_pLastMonitor ? "yes" : "no"));
+            result += getFormat("Monitor %s (ID %i):\n\t%ix%i@%f at %ix%i\n\tdescription: %s\n\tactive workspace: %i (%s)\n\treserved: %i %i %i %i\n\tscale: %.2f\n\ttransform: %i\n\tfocused: %s\n\tdpmsStatus: %i\n\n",
+                                m->szName.c_str(), m->ID, (int)m->vecPixelSize.x, (int)m->vecPixelSize.y, m->refreshRate, (int)m->vecPosition.x, (int)m->vecPosition.y, (m->output->description ? m->output->description : ""), m->activeWorkspace, g_pCompositor->getWorkspaceByID(m->activeWorkspace)->m_szName.c_str(), (int)m->vecReservedTopLeft.x, (int)m->vecReservedTopLeft.y, (int)m->vecReservedBottomRight.x, (int)m->vecReservedBottomRight.y, m->scale, (int)m->transform, (m.get() == g_pCompositor->m_pLastMonitor ? "yes" : "no"), (int)m->dpmsStatus);
         }
     }
 
@@ -91,8 +95,8 @@ R"#({
     "fullscreenMode": %i
 },)#",
                     w.get(),
-                    (int)w->m_vRealPosition.vec().x, (int)w->m_vRealPosition.vec().y,
-                    (int)w->m_vRealSize.vec().x, (int)w->m_vRealSize.vec().y,
+                    (int)w->m_vRealPosition.goalv().x, (int)w->m_vRealPosition.goalv().y,
+                    (int)w->m_vRealSize.goalv().x, (int)w->m_vRealSize.goalv().y,
                     w->m_iWorkspaceID, escapeJSONStrings(w->m_iWorkspaceID == -1 ? "" : g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID) ? g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID)->m_szName : std::string("Invalid workspace " + std::to_string(w->m_iWorkspaceID))).c_str(),
                     ((int)w->m_bIsFloating == 1 ? "true" : "false"),
                     w->m_iMonitorID,
@@ -116,7 +120,7 @@ R"#({
         for (auto& w : g_pCompositor->m_vWindows) {
             if (w->m_bIsMapped) {
                 result += getFormat("Window %x -> %s:\n\tat: %i,%i\n\tsize: %i,%i\n\tworkspace: %i (%s)\n\tfloating: %i\n\tmonitor: %i\n\tclass: %s\n\ttitle: %s\n\tpid: %i\n\txwayland: %i\n\tpinned: %i\n\tfullscreen: %i\n\tfullscreenmode: %i\n\n",
-                                w.get(), w->m_szTitle.c_str(), (int)w->m_vRealPosition.vec().x, (int)w->m_vRealPosition.vec().y, (int)w->m_vRealSize.vec().x, (int)w->m_vRealSize.vec().y, w->m_iWorkspaceID, (w->m_iWorkspaceID == -1 ? "" : g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID) ? g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID)->m_szName.c_str() : std::string("Invalid workspace " + std::to_string(w->m_iWorkspaceID)).c_str()), (int)w->m_bIsFloating, w->m_iMonitorID, g_pXWaylandManager->getAppIDClass(w.get()).c_str(), g_pXWaylandManager->getTitle(w.get()).c_str(), w->getPID(), (int)w->m_bIsX11, (int)w->m_bPinned, (int)w->m_bIsFullscreen, (w->m_bIsFullscreen ? (g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID) ? g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID)->m_efFullscreenMode : 0) : 0));
+                                w.get(), w->m_szTitle.c_str(), (int)w->m_vRealPosition.goalv().x, (int)w->m_vRealPosition.goalv().y, (int)w->m_vRealSize.goalv().x, (int)w->m_vRealSize.goalv().y, w->m_iWorkspaceID, (w->m_iWorkspaceID == -1 ? "" : g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID) ? g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID)->m_szName.c_str() : std::string("Invalid workspace " + std::to_string(w->m_iWorkspaceID)).c_str()), (int)w->m_bIsFloating, w->m_iMonitorID, g_pXWaylandManager->getAppIDClass(w.get()).c_str(), g_pXWaylandManager->getTitle(w.get()).c_str(), w->getPID(), (int)w->m_bIsX11, (int)w->m_bPinned, (int)w->m_bIsFullscreen, (w->m_bIsFullscreen ? (g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID) ? g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID)->m_efFullscreenMode : 0) : 0));
 
             }
         }
@@ -405,6 +409,24 @@ R"#(    {
         // remove trailing comma
         if (result[result.size() - 1] == ',')
             result.pop_back();
+        result += "\n],\n";
+
+        result += "\"switches\": [\n";
+
+        for (auto& d : g_pInputManager->m_lSwitches) {
+            result += getFormat(
+R"#(    {
+        "address": "0x%x",
+        "name": "%s"
+    },)#",
+                &d,
+                d.pWlrDevice ? d.pWlrDevice->name : ""
+            );
+        }
+
+        // remove trailing comma
+        if (result[result.size() - 1] == ',')
+            result.pop_back();
         result += "\n]\n";
 
         result += "}\n";
@@ -441,6 +463,12 @@ R"#(    {
 
         for (auto& d : g_pInputManager->m_lTouchDevices) {
             result += getFormat("\tTouch Device at %x:\n\t\t%s\n", &d, d.pWlrDevice ? d.pWlrDevice->name : "");
+        }
+
+        result += "\n\nSwitches:\n";
+
+        for (auto& d : g_pInputManager->m_lSwitches) {
+            result += getFormat("\tSwitch Device at %x:\n\t\t%s\n", &d, d.pWlrDevice ? d.pWlrDevice->name : "");
         }
     }
 
@@ -533,7 +561,7 @@ std::string dispatchKeyword(std::string in) {
 
     if (COMMAND.contains("input") || COMMAND.contains("device:")) {
         g_pInputManager->setKeyboardLayout(); // update kb layout
-        g_pInputManager->setMouseConfigs(); // update mouse cfgs
+        g_pInputManager->setPointerConfigs(); // update mouse cfgs
     }
 
     if (COMMAND.contains("general:layout"))
