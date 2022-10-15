@@ -153,7 +153,7 @@ void CAnimationManager::tick() {
                     g_pHyprRenderer->damageWindow(PWINDOW);
                 } else if (PWORKSPACE) {
                     for (auto& w : g_pCompositor->m_vWindows) {
-                        if (!w->m_bIsMapped || w->m_bHidden)
+                        if (!w->m_bIsMapped || w->isHidden())
                             continue;
 
                         if (w->m_iWorkspaceID != PWORKSPACE->m_iID)
@@ -359,6 +359,10 @@ void CAnimationManager::onWindowPostCreateClose(CWindow* pWindow, bool close) {
 
     // if the window is not being animated, that means the layout set a fixed size for it, don't animate.
     if (!pWindow->m_vRealPosition.isBeingAnimated() && !pWindow->m_vRealSize.isBeingAnimated())
+        return;
+
+    // if the animation is disabled and we are leaving, ignore the anim to prevent the snapshot being fucked
+    if (!pWindow->m_vRealPosition.m_pConfig->pValues->internalEnabled)
         return;
 
     if (pWindow->m_sAdditionalConfigData.animationStyle != "") {

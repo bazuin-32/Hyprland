@@ -20,6 +20,8 @@ enum eMouseBindMode {
 
 struct STouchData {
     CWindow* touchFocusWindow = nullptr;
+    SLayerSurface* touchFocusLS = nullptr;
+    wlr_surface* touchFocusSurface = nullptr;
     Vector2D touchSurfaceOrigin;
 };
 
@@ -53,6 +55,7 @@ public:
 
     void            setKeyboardLayout();
     void            setPointerConfigs();
+    void            setTouchDeviceConfigs();
 
     void            updateDragIcon();
     void            updateCapabilities(wlr_input_device*);
@@ -139,6 +142,11 @@ private:
     STabletTool*    ensureTabletToolPresent(wlr_tablet_tool*);
 
     void            applyConfigToKeyboard(SKeyboard*);
+
+    // this will be set after a refocus()
+    wlr_surface*    m_pFoundSurfaceToFocus = nullptr;
+    SLayerSurface*  m_pFoundLSToFocus = nullptr;
+    CWindow*        m_pFoundWindowToFocus = nullptr;
 };
 
 inline std::unique_ptr<CInputManager> g_pInputManager;

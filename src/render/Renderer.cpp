@@ -84,9 +84,7 @@ bool CHyprRenderer::shouldRenderWindow(CWindow* pWindow, CMonitor* pMonitor) {
         return true;
 
     // if not, check if it maybe is active on a different monitor.
-    if (g_pCompositor->isWorkspaceVisible(pWindow->m_iWorkspaceID) ||
-        (PWORKSPACE && PWORKSPACE->m_iMonitorID == pMonitor->ID && PWORKSPACE->m_bForceRendering) || // vvvv might be in animation progress vvvvv
-        (PWORKSPACE && PWORKSPACE->m_iMonitorID == pMonitor->ID && (PWORKSPACE->m_vRenderOffset.isBeingAnimated() || PWORKSPACE->m_fAlpha.isBeingAnimated())))
+    if (g_pCompositor->isWorkspaceVisible(pWindow->m_iWorkspaceID) && pWindow->m_bIsFloating /* tiled windows can't be multi-ws */)
         return !pWindow->m_bIsFullscreen; // Do not draw fullscreen windows on other monitors
 
     if (pMonitor->specialWorkspaceOpen && pWindow->m_iWorkspaceID == SPECIAL_WORKSPACE_ID)
@@ -217,7 +215,7 @@ void CHyprRenderer::renderWorkspaceWithFullscreenWindow(CMonitor* pMonitor, CWor
 }
 
 void CHyprRenderer::renderWindow(CWindow* pWindow, CMonitor* pMonitor, timespec* time, bool decorate, eRenderPassMode mode) {
-    if (pWindow->m_bHidden)
+    if (pWindow->isHidden())
         return;
 
     if (pWindow->m_bFadingOut) {
@@ -385,7 +383,7 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
 
     // Non-floating main
     for (auto& w : g_pCompositor->m_vWindows) {
-        if (w->m_bHidden && !w->m_bIsMapped && !w->m_bFadingOut)
+        if (w->isHidden() && !w->m_bIsMapped && !w->m_bFadingOut)
             continue;
 
         if (w->m_bIsFloating)
@@ -403,7 +401,7 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
 
     // Non-floating popup
     for (auto& w : g_pCompositor->m_vWindows) {
-        if (w->m_bHidden && !w->m_bIsMapped && !w->m_bFadingOut)
+        if (w->isHidden() && !w->m_bIsMapped && !w->m_bFadingOut)
             continue;
 
         if (w->m_bIsFloating)
@@ -421,7 +419,7 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
 
     // floating on top
     for (auto& w : g_pCompositor->m_vWindows) {
-        if (w->m_bHidden && !w->m_bIsMapped && !w->m_bFadingOut)
+        if (w->isHidden() && !w->m_bIsMapped && !w->m_bFadingOut)
             continue;
 
         if (!w->m_bIsFloating)
@@ -439,7 +437,7 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
 
     // and then special
     for (auto& w : g_pCompositor->m_vWindows) {
-        if (w->m_bHidden && !w->m_bIsMapped && !w->m_bFadingOut)
+        if (w->isHidden() && !w->m_bIsMapped && !w->m_bFadingOut)
             continue;
 
         if (w->m_iWorkspaceID != SPECIAL_WORKSPACE_ID)
@@ -955,8 +953,6 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
     wlr_output_set_scale(pMonitor->output, pMonitorRule->scale);
     pMonitor->scale = pMonitorRule->scale;
 
-    pMonitor->vecPosition = pMonitorRule->offset;
-
     // loop over modes and choose an appropriate one.
     if (pMonitorRule->resolution != Vector2D() && pMonitorRule->resolution != Vector2D(-1,-1) && pMonitorRule->resolution != Vector2D(-1,-2)) {
         if (!wl_list_empty(&pMonitor->output->modes)) {
@@ -1175,7 +1171,7 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
     pMonitor->vecSize = (Vector2D(x, y) / pMonitor->scale).floor();
     pMonitor->vecTransformedSize = Vector2D(x,y);
 
-    if (pMonitorRule->offset == Vector2D(-1, -1)) {
+    if (pMonitorRule->offset == Vector2D(-1, -1) && pMonitor->vecPosition == Vector2D(-1, -1)) {
         // let's find manually a sensible position for it, to the right.
         Vector2D finalPos;
 
@@ -1189,6 +1185,8 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
         }
 
         pMonitor->vecPosition = finalPos;
+    } else if (pMonitorRule->offset != Vector2D(-1, -1)) {
+        pMonitor->vecPosition = pMonitorRule->offset;
     }
 
     if (!pMonitor->isMirror())

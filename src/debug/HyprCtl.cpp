@@ -499,7 +499,7 @@ std::string versionRequest(HyprCtl::eHyprCtlOutputFormat format) {
 R"#({
     "branch": "%s",
     "commit": "%s",
-    "dirty": %s
+    "dirty": %s,
     "commit_message": "%s",
     "flags": [)#", GIT_BRANCH, GIT_COMMIT_HASH, (strcmp(GIT_DIRTY, "dirty") == 0 ? "true" : "false"), removeBeginEndSpacesTabs(GIT_COMMIT_MESSAGE).c_str());
 
@@ -562,6 +562,7 @@ std::string dispatchKeyword(std::string in) {
     if (COMMAND.contains("input") || COMMAND.contains("device:")) {
         g_pInputManager->setKeyboardLayout(); // update kb layout
         g_pInputManager->setPointerConfigs(); // update mouse cfgs
+        g_pInputManager->setTouchDeviceConfigs(); // update touch device cfgs
     }
 
     if (COMMAND.contains("general:layout"))
