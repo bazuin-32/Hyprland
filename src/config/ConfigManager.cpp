@@ -161,6 +161,7 @@ void CConfigManager::setDefaultVars() {
     configValues["gestures:workspace_swipe_invert"].intValue = 1;
     configValues["gestures:workspace_swipe_min_speed_to_force"].intValue = 30;
     configValues["gestures:workspace_swipe_cancel_ratio"].floatValue = 0.5f;
+    configValues["gestures:workspace_swipe_create_new"].intValue = 1;
 
     configValues["input:follow_mouse"].intValue = 1;
 
@@ -311,6 +312,31 @@ void CConfigManager::configSetValueSafe(const std::string& COMMAND, const std::s
                 // Values with 0x are hex
                 const auto VALUEWITHOUTHEX = VALUE.substr(2);
                 CONFIGENTRY->intValue = stol(VALUEWITHOUTHEX, nullptr, 16);
+            } else if (VALUE.find("rgba(") == 0 && VALUE.find(")") == VALUE.length() - 1) {
+                const auto VALUEWITHOUTFUNC = VALUE.substr(5, VALUE.length() - 6);
+
+                if (removeBeginEndSpacesTabs(VALUEWITHOUTFUNC).length() != 8) {
+                    Debug::log(WARN, "invalid length %i for rgba", VALUEWITHOUTFUNC.length());
+                    parseError = "rgba() expects length of 8 characters (4 bytes)";
+                    return;
+                }
+
+                const auto RGBA = std::stol(VALUEWITHOUTFUNC, nullptr, 16);
+
+                // now we need to RGBA -> ARGB. The config holds ARGB only.
+                CONFIGENTRY->intValue = (RGBA >> 8) + 0x1000000 * (RGBA & 0xFF);
+            } else if (VALUE.find("rgb(") == 0 && VALUE.find(")") == VALUE.length() - 1) {
+                const auto VALUEWITHOUTFUNC = VALUE.substr(4, VALUE.length() - 5);
+
+                if (removeBeginEndSpacesTabs(VALUEWITHOUTFUNC).length() != 6) {
+                    Debug::log(WARN, "invalid length %i for rgb", VALUEWITHOUTFUNC.length());
+                    parseError = "rgb() expects length of 6 characters (3 bytes)";
+                    return;
+                }
+
+                const auto RGB = std::stol(VALUEWITHOUTFUNC, nullptr, 16);
+
+                CONFIGENTRY->intValue = RGB + 0xFF000000; // 0xFF for opaque
             } else if (VALUE.find("true") == 0 || VALUE.find("on") == 0 || VALUE.find("yes") == 0) {
                 CONFIGENTRY->intValue = 1;
             } else if (VALUE.find("false") == 0 || VALUE.find("off") == 0 || VALUE.find("no") == 0) {
@@ -722,16 +748,20 @@ bool windowRuleValid(const std::string& RULE) {
         && RULE.find("move") != 0
         && RULE.find("size") != 0
         && RULE.find("minsize") != 0
+        && RULE.find("maxsize") != 0
         && RULE.find("pseudo") != 0
         && RULE.find("monitor") != 0
         && RULE != "nofocus"
         && RULE != "noblur"
+        && RULE != "noshadow"
+        && RULE != "noborder"
         && RULE != "center"
         && RULE != "opaque"
         && RULE != "forceinput"
         && RULE != "fullscreen"
         && RULE != "pin"
         && RULE != "noanim"
+        && RULE != "windowdance"
         && RULE.find("animation") != 0
         && RULE.find("rounding") != 0
         && RULE.find("workspace") != 0);

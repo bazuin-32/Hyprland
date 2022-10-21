@@ -107,13 +107,16 @@ CCompositor::CCompositor() {
     m_sWLRScene = wlr_scene_create();
     wlr_scene_attach_output_layout(m_sWLRScene, m_sWLROutputLayout);
 
-    m_sWLRXDGShell = wlr_xdg_shell_create(m_sWLDisplay, 4);
+    m_sWLRXDGShell = wlr_xdg_shell_create(m_sWLDisplay, 5);
 
     m_sWLRCursor = wlr_cursor_create();
     wlr_cursor_attach_output_layout(m_sWLRCursor, m_sWLROutputLayout);
 
     m_sWLRXCursorMgr = wlr_xcursor_manager_create(nullptr, 24);
     wlr_xcursor_manager_load(m_sWLRXCursorMgr, 1);
+
+    if (const auto XCURSORENV = getenv("XCURSOR_SIZE"); !XCURSORENV || std::string(XCURSORENV).empty())
+        setenv("XCURSOR_SIZE", "24", true);
 
     m_sSeat.seat = wlr_seat_create(m_sWLDisplay, "seat0");
 
@@ -1649,7 +1652,7 @@ void CCompositor::setWindowFullscreen(CWindow* pWindow, bool on, eFullscreenMode
         if (w->m_iWorkspaceID == pWindow->m_iWorkspaceID) {
             w->m_bCreatedOverFullscreen = false;
             if (w.get() != pWindow && !w->m_bFadingOut && !w->m_bPinned)
-                w->m_fAlpha = pWindow->m_bIsFullscreen && mode == FULLSCREEN_FULL ? 0.f : 255.f;
+                w->m_fAlpha = pWindow->m_bIsFullscreen ? 0.f : 255.f;
         }
     }
 

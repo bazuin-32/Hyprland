@@ -799,7 +799,7 @@ void CHyprOpenGLImpl::renderBorder(wlr_box* box, const CColor& col, int round) {
     RASSERT((box->width > 0 && box->height > 0), "Tried to render rect with width/height < 0!");
     RASSERT(m_RenderData.pMonitor, "Tried to render rect without begin()!");
 
-    if (!pixman_region32_not_empty(m_RenderData.pDamage))
+    if (!pixman_region32_not_empty(m_RenderData.pDamage) || (m_pCurrentWindow && m_pCurrentWindow->m_sAdditionalConfigData.forceNoBorder))
 	return;
 
     static auto *const PBORDERSIZE = &g_pConfigManager->getConfigValuePtr("general:border_size")->intValue;
@@ -975,8 +975,13 @@ void CHyprOpenGLImpl::makeLayerSnapshot(SLayerSurface* pLayer) {
     timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
 
+    const auto BLURLSSTATUS = pLayer->forceBlur;
+    pLayer->forceBlur = false;
+
     // draw the layer
     g_pHyprRenderer->renderLayer(pLayer, PMONITOR, &now);
+
+    pLayer->forceBlur = BLURLSSTATUS;
 
     // TODO: WARN:
     // revise if any stencil-requiring rendering is done to the layers.

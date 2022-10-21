@@ -161,10 +161,16 @@ void Events::listener_mapWindow(void* owner, void* data) {
             PWINDOW->m_bNoFocus = true;
         } else if (r.szRule == "noblur") {
             PWINDOW->m_sAdditionalConfigData.forceNoBlur = true;
+        } else if (r.szRule == "noborder") {
+            PWINDOW->m_sAdditionalConfigData.forceNoBorder = true;
+        } else if (r.szRule == "noshadow") {
+            PWINDOW->m_sAdditionalConfigData.forceNoShadow = true;
         } else if (r.szRule == "fullscreen") {
             requestsFullscreen = true;
         } else if (r.szRule == "opaque") {
             PWINDOW->m_sAdditionalConfigData.forceOpaque = true;
+        } else if (r.szRule == "windowdance") {
+            PWINDOW->m_sAdditionalConfigData.windowDanceCompat = true;
         } else if (r.szRule == "forceinput") {
             PWINDOW->m_sAdditionalConfigData.forceAllowsInput = true;
         } else if (r.szRule == "pin") {
@@ -268,6 +274,21 @@ void Events::listener_mapWindow(void* owner, void* data) {
                     PWINDOW->setHidden(false);
                 } catch (...) {
                     Debug::log(LOG, "Rule minsize failed, rule: %s -> %s", r.szRule.c_str(), r.szValue.c_str());
+                }
+            } else if (r.szRule.find("maxsize") == 0) {
+                try {
+                    const auto VALUE = r.szRule.substr(r.szRule.find(" ") + 1);
+                    const auto SIZEXSTR = VALUE.substr(0, VALUE.find(" "));
+                    const auto SIZEYSTR = VALUE.substr(VALUE.find(" ") + 1);
+
+                    const auto SIZE = Vector2D(std::min((double)std::stoll(SIZEXSTR), PWINDOW->m_vRealSize.goalv().x), std::min((double)std::stoll(SIZEYSTR), PWINDOW->m_vRealSize.goalv().y));
+
+                    PWINDOW->m_vRealSize = SIZE;
+                    g_pXWaylandManager->setWindowSize(PWINDOW, PWINDOW->m_vRealSize.goalv());
+
+                    PWINDOW->setHidden(false);
+                } catch (...) {
+                    Debug::log(LOG, "Rule maxsize failed, rule: %s -> %s", r.szRule.c_str(), r.szValue.c_str());
                 }
             } else if (r.szRule.find("move") == 0) {
                 try {
@@ -542,6 +563,8 @@ void Events::listener_unmapWindow(void* owner, void* data) {
                 g_pInputManager->refocus();
             else
                 g_pCompositor->focusWindow(PWINDOWCANDIDATE);
+        } else {
+            g_pInputManager->refocus();
         }
     } else {
         Debug::log(LOG, "Unmapped was not focused, ignoring a refocus.");
@@ -716,7 +739,8 @@ void Events::listener_configureX11(void* owner, void* data) {
 
     PWINDOW->m_bCreatedOverFullscreen = true;
 
-    g_pInputManager->refocus();
+    if (!PWINDOW->m_sAdditionalConfigData.windowDanceCompat)
+        g_pInputManager->refocus();
 
     g_pHyprRenderer->damageWindow(PWINDOW);
 
