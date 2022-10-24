@@ -723,6 +723,8 @@ void CCompositor::focusWindow(CWindow* pWindow, wlr_surface* pSurface) {
 
         g_pEventManager->postEvent(SHyprIPCEvent{"activewindow", ","});
 
+        g_pLayoutManager->getCurrentLayout()->onWindowFocusChange(nullptr);
+
         m_pLastFocus = nullptr;
         return;
     }
@@ -773,6 +775,8 @@ void CCompositor::focusWindow(CWindow* pWindow, wlr_surface* pSurface) {
 
     // Send an event
     g_pEventManager->postEvent(SHyprIPCEvent{"activewindow", g_pXWaylandManager->getAppIDClass(pWindow) + "," + pWindow->m_szTitle});
+
+    g_pLayoutManager->getCurrentLayout()->onWindowFocusChange(pWindow);
 
     if (pWindow->m_phForeignToplevel)
         wlr_foreign_toplevel_handle_v1_set_activated(pWindow->m_phForeignToplevel, true);
@@ -1870,4 +1874,18 @@ bool CCompositor::cursorOnReservedArea() {
     const auto CURSORPOS = g_pInputManager->getMouseCoordsInternal();
 
     return !VECINRECT(CURSORPOS, XY1.x, XY1.y, XY2.x, XY2.y);
+}
+
+CWorkspace* CCompositor::createNewWorkspace(const int& id, const int& monid, const std::string& name) {
+    const auto NAME = name == "" ? std::to_string(id) : name;
+    const auto PWORKSPACE = m_vWorkspaces.emplace_back(std::make_unique<CWorkspace>(monid, NAME, id == SPECIAL_WORKSPACE_ID)).get();
+
+    // We are required to set the name here immediately
+    if (id != SPECIAL_WORKSPACE_ID)
+        wlr_ext_workspace_handle_v1_set_name(PWORKSPACE->m_pWlrHandle, NAME.c_str());
+
+    PWORKSPACE->m_iID = id;
+    PWORKSPACE->m_iMonitorID = monid;
+
+    return PWORKSPACE;
 }
