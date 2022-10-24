@@ -60,6 +60,7 @@ void CConfigManager::setDefaultVars() {
     configValues["misc:disable_autoreload"].intValue = 0;
     configValues["misc:enable_swallow"].intValue = 0;
     configValues["misc:swallow_regex"].strValue = STRVAL_EMPTY;
+    configValues["misc:focus_on_activate"].intValue = 1;
 
     configValues["debug:int"].intValue = 0;
     configValues["debug:log_damage"].intValue = 0;
@@ -1203,6 +1204,7 @@ void CConfigManager::loadConfigLoadVars() {
 
         // check
         ensureDPMS();
+        ensureVRR();
     }
 
     // Update window border colors
@@ -1530,6 +1532,40 @@ void CConfigManager::ensureDPMS() {
         if (rule.disabled == rm->m_bEnabled) {
 	        rm->m_pThisWrap = &rm;
             g_pHyprRenderer->applyMonitorRule(rm.get(), &rule);
+        }
+    }
+}
+
+void CConfigManager::ensureVRR() {
+    static auto *const PNOVRR = &getConfigValuePtr("misc:no_vfr")->intValue;
+    
+    for (auto& m : g_pCompositor->m_vMonitors) {
+        if (!*PNOVRR && !m->vrrActive) {
+            // Adaptive sync (VRR)
+            wlr_output_enable_adaptive_sync(m->output, 1);
+
+            if (!wlr_output_test(m->output)) {
+                Debug::log(LOG, "Pending output %s does not accept VRR.", m->output->name);
+                wlr_output_enable_adaptive_sync(m->output, 0);
+            }
+
+            if (!wlr_output_commit(m->output)) {
+                Debug::log(ERR, "Couldn't commit output %s in ensureVRR -> true", m->output->name);
+            }
+
+            m->vrrActive = true;
+
+            Debug::log(LOG, "VRR ensured on %s -> true", m->output->name);
+        } else if (*PNOVRR && m->vrrActive) {
+            wlr_output_enable_adaptive_sync(m->output, 0);
+
+            if (!wlr_output_commit(m->output)) {
+                Debug::log(ERR, "Couldn't commit output %s in ensureVRR -> false", m->output->name);
+            }
+
+            m->vrrActive = false;
+
+            Debug::log(LOG, "VRR ensured on %s -> false", m->output->name);
         }
     }
 }

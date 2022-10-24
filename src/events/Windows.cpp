@@ -214,16 +214,16 @@ void Events::listener_mapWindow(void* owner, void* data) {
             if (requestedWorkspace.contains("silent")) {
                 workspaceSilent = true;
                 shouldFocus = false;
-            }
 
-            requestedWorkspace = requestedWorkspace.substr(0, requestedWorkspace.find_first_of(' '));
+                requestedWorkspace = requestedWorkspace.substr(0, requestedWorkspace.find_first_of(' '));
+            }
 
             if (!shouldFocus && requestedWorkspace == std::to_string(PMONITOR->activeWorkspace))
                 shouldFocus = true;
+        }
 
-            if (requestedWorkspace == "special") {
-                workspaceSilent = true;
-            }
+        if (requestedWorkspace == "special") {
+            workspaceSilent = true;
         }
 
         if (!workspaceSilent) {
@@ -602,6 +602,9 @@ void Events::listener_unmapWindow(void* owner, void* data) {
 
     // recheck idle inhibitors
     g_pInputManager->recheckIdleInhibitorStatus();
+
+    // force report all sizes (QT sometimes has an issue with this)
+    g_pCompositor->forceReportSizesToWindowsOnWorkspace(PWINDOW->m_iWorkspaceID);
 }
 
 void Events::listener_commitWindow(void* owner, void* data) {
@@ -688,16 +691,39 @@ void Events::listener_fullscreenWindow(void* owner, void* data) {
     g_pXWaylandManager->setWindowFullscreen(PWINDOW, PWINDOW->m_bIsFullscreen);
 }
 
-void Events::listener_activate(void* owner, void* data) {
-    // TODO
+void Events::listener_activateXDG(wl_listener* listener, void* data) {
+    const auto E = (wlr_xdg_activation_v1_request_activate_event*)data;
+
+    static auto *const PFOCUSONACTIVATE = &g_pConfigManager->getConfigValuePtr("misc:focus_on_activate")->intValue;
+
+    Debug::log(LOG, "Activate request for surface at %x", E->surface);
+
+    if (!*PFOCUSONACTIVATE || !wlr_surface_is_xdg_surface(E->surface))
+        return;
+
+    const auto PWINDOW = g_pCompositor->getWindowFromSurface(E->surface);
+
+    if (!PWINDOW || PWINDOW == g_pCompositor->m_pLastWindow)
+        return;
+
+    g_pCompositor->focusWindow(PWINDOW);
+    Vector2D middle = PWINDOW->m_vRealPosition.goalv() + PWINDOW->m_vRealSize.goalv() / 2.f;
+    g_pCompositor->warpCursorTo(middle);
 }
 
 void Events::listener_activateX11(void* owner, void* data) {
-    CWindow* PWINDOW = (CWindow*)owner;
+    const auto PWINDOW = (CWindow*)owner;
 
-    if (PWINDOW->m_iX11Type == 1 /* Managed */) {
-        wlr_xwayland_surface_activate(PWINDOW->m_uSurface.xwayland, 1);
-    }
+    static auto *const PFOCUSONACTIVATE = &g_pConfigManager->getConfigValuePtr("misc:focus_on_activate")->intValue;
+
+    Debug::log(LOG, "X11 Activate request for window %x", PWINDOW);
+
+    if (!*PFOCUSONACTIVATE || PWINDOW->m_iX11Type != 1 || PWINDOW == g_pCompositor->m_pLastWindow)
+        return;
+
+    g_pCompositor->focusWindow(PWINDOW);
+    Vector2D middle = PWINDOW->m_vRealPosition.goalv() + PWINDOW->m_vRealSize.goalv() / 2.f;
+    g_pCompositor->warpCursorTo(middle);
 }
 
 void Events::listener_configureX11(void* owner, void* data) {
