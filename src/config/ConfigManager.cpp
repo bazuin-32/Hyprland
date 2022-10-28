@@ -60,7 +60,7 @@ void CConfigManager::setDefaultVars() {
     configValues["misc:disable_autoreload"].intValue = 0;
     configValues["misc:enable_swallow"].intValue = 0;
     configValues["misc:swallow_regex"].strValue = STRVAL_EMPTY;
-    configValues["misc:focus_on_activate"].intValue = 1;
+    configValues["misc:focus_on_activate"].intValue = 0;
 
     configValues["debug:int"].intValue = 0;
     configValues["debug:log_damage"].intValue = 0;
@@ -193,6 +193,7 @@ void CConfigManager::setDeviceDefaultVars(const std::string& dev) {
     cfgValues["scroll_method"].strValue = STRVAL_EMPTY;
     cfgValues["touch_transform"].intValue = 0;
     cfgValues["touch_output"].strValue = STRVAL_EMPTY;
+    cfgValues["enabled"].intValue = 1; // only for mice / touchpads
 }
 
 void CConfigManager::setDefaultAnimationVars() {
@@ -530,6 +531,9 @@ void CConfigManager::handleMonitor(const std::string& command, const std::string
     while (ARGS[argno] != "") {
         if (ARGS[argno] == "mirror") {
             newrule.mirrorOf = ARGS[argno + 1];
+            argno++;
+        } else if (ARGS[argno] == "bitdepth") {
+            newrule.enable10bit = ARGS[argno + 1] == "10";
             argno++;
         } else {
             Debug::log(ERR, "Config error: invalid monitor syntax");
@@ -1016,13 +1020,26 @@ void CConfigManager::applyUserDefinedVars(std::string& line, const size_t equals
 
 void CConfigManager::parseLine(std::string& line) {
     // first check if its not a comment
-    const auto COMMENTSTART = line.find_first_of('#');
-    if (COMMENTSTART == 0)
+    if (line[0] == '#')
         return;
 
-    // now, cut the comment off
-    if (COMMENTSTART != std::string::npos)
-        line = line.substr(0, COMMENTSTART);
+    // now, cut the comment off. ## is an escape.
+    for (long unsigned int i = 1; i < line.length(); ++i) {
+        if (line[i] == '#') {
+            if (i + 1 < line.length() && line[i + 1] != '#') {
+                line = line.substr(0, i);
+                break; // no need to parse more
+            }
+
+            i++;
+        }
+    }
+
+    size_t startPos = 0;
+    while ((startPos = line.find("##", startPos)) != std::string::npos) {
+        line.replace(startPos, 2, "#");
+        startPos++;
+    }
 
     // remove shit at the beginning
     while (line[0] == ' ' || line[0] == '\t') {

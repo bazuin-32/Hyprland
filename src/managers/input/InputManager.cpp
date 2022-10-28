@@ -311,7 +311,6 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
     } else {
         if (pFoundLayerSurface && pFoundLayerSurface->layerSurface->current.keyboard_interactive && *PFOLLOWMOUSE != 3 && allowKeyboardRefocus) {
             g_pCompositor->focusSurface(foundSurface);
-            g_pCompositor->m_pLastWindow = nullptr; // reset last window as we have a full focus on a LS
         }
 
         if (pFoundLayerSurface)
@@ -684,6 +683,8 @@ void CInputManager::newMouse(wlr_input_device* mouse, bool virt) {
 
     wlr_cursor_attach_input_device(g_pCompositor->m_sWLRCursor, mouse);
 
+    PMOUSE->connected = true;
+
     g_pCompositor->m_sSeat.mouse = PMOUSE;
 
     m_tmrLastCursorMovement.reset();
@@ -699,6 +700,17 @@ void CInputManager::setPointerConfigs() {
         transform(devname.begin(), devname.end(), devname.begin(), ::tolower);
 
         const auto HASCONFIG = g_pConfigManager->deviceConfigExists(devname);
+
+        if (HASCONFIG) {
+            const auto ENABLED = g_pConfigManager->getDeviceInt(devname, "enabled");
+            if (ENABLED && !m.connected) {
+                wlr_cursor_attach_input_device(g_pCompositor->m_sWLRCursor, m.mouse);
+                m.connected = true;
+            } else if (!ENABLED && m.connected) {
+                wlr_cursor_detach_input_device(g_pCompositor->m_sWLRCursor, m.mouse);
+                m.connected = false;
+            }
+        }
 
         if (wlr_input_device_is_libinput(m.mouse)) {
             const auto LIBINPUTDEV = (libinput_device*)wlr_libinput_get_device_handle(m.mouse);

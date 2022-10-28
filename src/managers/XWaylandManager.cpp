@@ -3,23 +3,23 @@
 #include "../events/Events.hpp"
 
 CHyprXWaylandManager::CHyprXWaylandManager() {
-    if (XWAYLAND) {
-        m_sWLRXWayland = wlr_xwayland_create(g_pCompositor->m_sWLDisplay, g_pCompositor->m_sWLRCompositor, 1);
+#ifndef NO_XWAYLAND
+    m_sWLRXWayland = wlr_xwayland_create(g_pCompositor->m_sWLDisplay, g_pCompositor->m_sWLRCompositor, 1);
 
-        if (!m_sWLRXWayland) {
-            Debug::log(ERR, "Couldn't start up the XWaylandManager because wlr_xwayland_create returned a nullptr!");
-            return;
-        }
-
-        addWLSignal(&m_sWLRXWayland->events.ready, &Events::listen_readyXWayland, m_sWLRXWayland, "XWayland Manager");
-        addWLSignal(&m_sWLRXWayland->events.new_surface, &Events::listen_surfaceXWayland, m_sWLRXWayland, "XWayland Manager");
-
-        setenv("DISPLAY", m_sWLRXWayland->display_name, 1);
-
-        Debug::log(LOG, "CHyprXWaylandManager started on display %s", m_sWLRXWayland->display_name);
-    } else {
-        unsetenv("DISPLAY"); // unset DISPLAY so that X11 apps do not try to start on a different/invalid DISPLAY
+    if (!m_sWLRXWayland) {
+        Debug::log(ERR, "Couldn't start up the XWaylandManager because wlr_xwayland_create returned a nullptr!");
+        return;
     }
+
+    addWLSignal(&m_sWLRXWayland->events.ready, &Events::listen_readyXWayland, m_sWLRXWayland, "XWayland Manager");
+    addWLSignal(&m_sWLRXWayland->events.new_surface, &Events::listen_surfaceXWayland, m_sWLRXWayland, "XWayland Manager");
+
+    setenv("DISPLAY", m_sWLRXWayland->display_name, 1);
+
+    Debug::log(LOG, "CHyprXWaylandManager started on display %s", m_sWLRXWayland->display_name);
+#else
+    unsetenv("DISPLAY");  // unset DISPLAY so that X11 apps do not try to start on a different/invalid DISPLAY
+#endif
 }
 
 CHyprXWaylandManager::~CHyprXWaylandManager() {
@@ -53,17 +53,21 @@ void CHyprXWaylandManager::activateSurface(wlr_surface* pSurface, bool activate)
 
 void CHyprXWaylandManager::activateWindow(CWindow* pWindow, bool activate) {
     if (pWindow->m_bIsX11) {
-        if (pWindow->m_uSurface.xwayland->minimized)
-            wlr_xwayland_surface_set_minimized(pWindow->m_uSurface.xwayland, false);
 
+        if (activate) {
+            wlr_xwayland_surface_set_minimized(pWindow->m_uSurface.xwayland, false);
+            wlr_xwayland_surface_restack(pWindow->m_uSurface.xwayland, NULL, XCB_STACK_MODE_ABOVE);
+        }
+        
         wlr_xwayland_surface_activate(pWindow->m_uSurface.xwayland, activate);
-        wlr_xwayland_surface_restack(pWindow->m_uSurface.xwayland, NULL, XCB_STACK_MODE_ABOVE);
     }
     else
         wlr_xdg_toplevel_set_activated(pWindow->m_uSurface.xdg->toplevel, activate);
 
-    g_pCompositor->m_pLastFocus = getWindowSurface(pWindow);
-    g_pCompositor->m_pLastWindow = pWindow;
+    if (activate) {
+        g_pCompositor->m_pLastFocus = getWindowSurface(pWindow);
+        g_pCompositor->m_pLastWindow = pWindow;
+    }
 
     if (!pWindow->m_bPinned)
         g_pCompositor->getWorkspaceByID(pWindow->m_iWorkspaceID)->m_pLastFocusedWindow = pWindow;

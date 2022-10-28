@@ -715,6 +715,8 @@ void CCompositor::focusWindow(CWindow* pWindow, wlr_surface* pSurface) {
         if (windowValidMapped(PLASTWINDOW)) {
             updateWindowAnimatedDecorationValues(PLASTWINDOW);
 
+            g_pXWaylandManager->activateWindow(PLASTWINDOW, false);
+
             if (PLASTWINDOW->m_phForeignToplevel)
                 wlr_foreign_toplevel_handle_v1_set_activated(PLASTWINDOW->m_phForeignToplevel, false);
         }
@@ -750,10 +752,8 @@ void CCompositor::focusWindow(CWindow* pWindow, wlr_surface* pSurface) {
     if (windowValidMapped(PLASTWINDOW)) {
         updateWindowAnimatedDecorationValues(PLASTWINDOW);
 
-        if (PLASTWINDOW->m_bIsX11) {
-            wlr_seat_keyboard_notify_clear_focus(m_sSeat.seat);
-            wlr_seat_pointer_clear_focus(m_sSeat.seat);
-        }
+        if (!pWindow->m_bIsX11 || pWindow->m_iX11Type == 1)
+            g_pXWaylandManager->activateWindow(PLASTWINDOW, false);
 
         if (PLASTWINDOW->m_phForeignToplevel)
             wlr_foreign_toplevel_handle_v1_set_activated(PLASTWINDOW->m_phForeignToplevel, false);
@@ -780,6 +780,14 @@ void CCompositor::focusWindow(CWindow* pWindow, wlr_surface* pSurface) {
 
     if (pWindow->m_phForeignToplevel)
         wlr_foreign_toplevel_handle_v1_set_activated(pWindow->m_phForeignToplevel, true);
+
+    if (!pWindow->m_bIsX11) {
+        const auto PCONSTRAINT = wlr_pointer_constraints_v1_constraint_for_surface(m_sWLRPointerConstraints, pWindow->m_uSurface.xdg->surface, m_sSeat.seat);
+
+        if (PCONSTRAINT)
+            g_pInputManager->constrainMouse(m_sSeat.mouse, PCONSTRAINT);
+    }
+    
 }
 
 void CCompositor::focusSurface(wlr_surface* pSurface, CWindow* pWindowOwner) {
@@ -788,7 +796,7 @@ void CCompositor::focusSurface(wlr_surface* pSurface, CWindow* pWindowOwner) {
         return;  // Don't focus when already focused on this.
 
     // Unfocus last surface if should
-    if (m_pLastFocus && ((m_sSeat.seat->keyboard_state.focused_surface && wlr_surface_is_xdg_surface(m_pLastFocus)) || !pSurface))
+    if (m_pLastFocus && !pWindowOwner)
         g_pXWaylandManager->activateSurface(m_pLastFocus, false);
 
     if (!pSurface) {
@@ -1268,6 +1276,11 @@ bool CCompositor::isPointOnAnyMonitor(const Vector2D& point) {
     return false;
 }
 
+void checkFocusSurfaceIter(wlr_surface* pSurface, int x, int y, void* data) {
+    auto pair = (std::pair<wlr_surface*, bool>*)data;
+    pair->second = pair->second || pSurface == pair->first;
+}
+
 CWindow* CCompositor::getConstraintWindow(SMouse* pMouse) {
     if (!pMouse->currentConstraint)
         return nullptr;
@@ -1275,11 +1288,18 @@ CWindow* CCompositor::getConstraintWindow(SMouse* pMouse) {
     const auto PSURFACE = pMouse->currentConstraint->surface;
 
     for (auto& w : m_vWindows) {
-        if (PSURFACE == g_pXWaylandManager->getWindowSurface(w.get())) {
-            if (!w->m_bIsX11 && w->m_bIsMapped && !w->isHidden())
-                continue;
+        if (w->isHidden() || !w->m_bMappedX11 || !w->m_bIsMapped || !g_pXWaylandManager->getWindowSurface(w.get()))
+            continue;
 
-            return w.get();
+        if (w->m_bIsX11) {
+            if (PSURFACE == g_pXWaylandManager->getWindowSurface(w.get()))
+                return w.get();
+        } else {
+            std::pair<wlr_surface*, bool> check = {PSURFACE, false};
+            wlr_surface_for_each_surface(w->m_uSurface.xdg->surface, checkFocusSurfaceIter, &check);
+
+            if (check.second)
+                return w.get();
         }
     }
 
@@ -1878,14 +1898,21 @@ bool CCompositor::cursorOnReservedArea() {
 
 CWorkspace* CCompositor::createNewWorkspace(const int& id, const int& monid, const std::string& name) {
     const auto NAME = name == "" ? std::to_string(id) : name;
-    const auto PWORKSPACE = m_vWorkspaces.emplace_back(std::make_unique<CWorkspace>(monid, NAME, id == SPECIAL_WORKSPACE_ID)).get();
+    auto monID = monid;
+
+    // check if bound
+    if (const auto PMONITOR = g_pConfigManager->getBoundMonitorForWS(NAME); PMONITOR) {
+        monID = PMONITOR->ID;
+    }
+
+    const auto PWORKSPACE = m_vWorkspaces.emplace_back(std::make_unique<CWorkspace>(monID, NAME, id == SPECIAL_WORKSPACE_ID)).get();
 
     // We are required to set the name here immediately
     if (id != SPECIAL_WORKSPACE_ID)
         wlr_ext_workspace_handle_v1_set_name(PWORKSPACE->m_pWlrHandle, NAME.c_str());
 
     PWORKSPACE->m_iID = id;
-    PWORKSPACE->m_iMonitorID = monid;
+    PWORKSPACE->m_iMonitorID = monID;
 
     return PWORKSPACE;
 }
