@@ -728,6 +728,8 @@ void CCompositor::focusWindow(CWindow* pWindow, wlr_surface* pSurface) {
         g_pLayoutManager->getCurrentLayout()->onWindowFocusChange(nullptr);
 
         m_pLastFocus = nullptr;
+
+        g_pInputManager->recheckIdleInhibitorStatus();
         return;
     }
 
@@ -787,7 +789,8 @@ void CCompositor::focusWindow(CWindow* pWindow, wlr_surface* pSurface) {
         if (PCONSTRAINT)
             g_pInputManager->constrainMouse(m_sSeat.mouse, PCONSTRAINT);
     }
-    
+
+    g_pInputManager->recheckIdleInhibitorStatus();
 }
 
 void CCompositor::focusSurface(wlr_surface* pSurface, CWindow* pWindowOwner) {
@@ -1576,7 +1579,7 @@ void CCompositor::moveWorkspaceToMonitor(CWorkspace* pWorkspace, CMonitor* pMoni
     if (nextWorkspaceOnMonitorID == -1) {
         nextWorkspaceOnMonitorID = 1;
 
-        while (getWorkspaceByID(nextWorkspaceOnMonitorID))
+        while (getWorkspaceByID(nextWorkspaceOnMonitorID) || [&]() -> bool { const auto B = g_pConfigManager->getBoundMonitorForWS(std::to_string(nextWorkspaceOnMonitorID)); return B && B != POLDMON; }())
             nextWorkspaceOnMonitorID++;
 
         Debug::log(LOG, "moveWorkspaceToMonitor: Plugging gap with new %d", nextWorkspaceOnMonitorID);
@@ -1691,6 +1694,8 @@ void CCompositor::setWindowFullscreen(CWindow* pWindow, bool on, eFullscreenMode
     g_pXWaylandManager->setWindowSize(pWindow, pWindow->m_vRealSize.goalv(), true);
 
     forceReportSizesToWindowsOnWorkspace(pWindow->m_iWorkspaceID);
+
+    g_pInputManager->recheckIdleInhibitorStatus();
 }
 
 void CCompositor::moveUnmanagedX11ToWindows(CWindow* pWindow) {

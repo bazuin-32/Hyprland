@@ -1214,15 +1214,13 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
         pMonitor->vecPosition = pMonitorRule->offset;
     }
 
-    if (!pMonitor->isMirror())
-        wlr_output_layout_add(g_pCompositor->m_sWLROutputLayout, pMonitor->output, (int)pMonitor->vecPosition.x, (int)pMonitor->vecPosition.y);
-
     wlr_output_enable(pMonitor->output, true);
 
     // update renderer (here because it will call rollback, so we cannot do this before committing)
     g_pHyprOpenGL->destroyMonitorResources(pMonitor);
 
     // updato wlroots
+    wlr_output_layout_add(g_pCompositor->m_sWLROutputLayout, pMonitor->output, (int)pMonitor->vecPosition.x, (int)pMonitor->vecPosition.y);
     Events::listener_change(nullptr, nullptr);
 
     // updato us

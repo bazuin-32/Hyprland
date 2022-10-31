@@ -99,10 +99,6 @@ void CMonitor::onConnect(bool noRule) {
 
     wlr_output_enable(output, 1);
 
-    // TODO: this doesn't seem to set the X and Y correctly,
-    // wlr_output_layout_output_coords returns invalid values, I think...
-    wlr_output_layout_add(g_pCompositor->m_sWLROutputLayout, output, monitorRule.offset.x, monitorRule.offset.y);
-
     // set mode, also applies
     if (!noRule)
         g_pHyprRenderer->applyMonitorRule(this, &monitorRule, true);
@@ -138,7 +134,7 @@ void CMonitor::onConnect(bool noRule) {
     g_pEventManager->postEvent(SHyprIPCEvent{"monitoradded", szName});
 
     // ensure VRR (will enable if necessary)
-    g_pConfigManager->ensureVRR();
+    g_pConfigManager->ensureVRR(this);
 }
 
 void CMonitor::onDisconnect() {
@@ -154,6 +150,9 @@ void CMonitor::onDisconnect() {
             break;
         }
     }
+
+    if (g_pCompositor->m_pLastMonitor == this)
+        g_pCompositor->m_pLastMonitor = BACKUPMON;
 
     // remove mirror
     if (pMirrorOf) {
