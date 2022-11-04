@@ -35,9 +35,6 @@ void CConfigManager::setDefaultVars() {
     configValues["general:main_mod"].strValue = "SUPER";                                               // exposed to the user for easier configuring
     configValues["general:main_mod_internal"].intValue = g_pKeybindManager->stringToModMask("SUPER");  // actually used and automatically calculated
 
-    configValues["general:damage_tracking"].strValue = "full";
-    configValues["general:damage_tracking_internal"].intValue = DAMAGE_TRACKING_FULL;
-
     configValues["general:border_size"].intValue = 1;
     configValues["general:no_border_on_floating"].intValue = 0;
     configValues["general:gaps_in"].intValue = 5;
@@ -68,6 +65,7 @@ void CConfigManager::setDefaultVars() {
     configValues["debug:damage_blink"].intValue = 0;
     configValues["debug:disable_logs"].intValue = 0;
     configValues["debug:disable_time"].intValue = 1;
+    configValues["debug:damage_tracking"].intValue = DAMAGE_TRACKING_FULL;
 
     configValues["decoration:rounding"].intValue = 0;
     configValues["decoration:blur"].intValue = 1;
@@ -163,6 +161,7 @@ void CConfigManager::setDefaultVars() {
     configValues["gestures:workspace_swipe_min_speed_to_force"].intValue = 30;
     configValues["gestures:workspace_swipe_cancel_ratio"].floatValue = 0.5f;
     configValues["gestures:workspace_swipe_create_new"].intValue = 1;
+    configValues["gestures:workspace_swipe_forever"].intValue = 0;
 
     configValues["input:follow_mouse"].intValue = 1;
 
@@ -782,6 +781,13 @@ void CConfigManager::handleWindowRule(const std::string& command, const std::str
         return;
     }
 
+    if (RULE == "unset") {
+        std::erase_if(m_dWindowRules, [&] (const SWindowRule& other) {
+            return other.szValue == VALUE;
+        });
+        return;
+    }
+
     // verify we support a rule
     if (!windowRuleValid(RULE)) {
         Debug::log(ERR, "Invalid rule found: %s", RULE.c_str());
@@ -796,7 +802,7 @@ void CConfigManager::handleWindowRuleV2(const std::string& command, const std::s
     const auto RULE = value.substr(0, value.find_first_of(","));
     const auto VALUE = value.substr(value.find_first_of(",") + 1);
 
-    if (!windowRuleValid(RULE)) {
+    if (!windowRuleValid(RULE) && RULE != "unset") {
         Debug::log(ERR, "Invalid rulev2 found: %s", RULE.c_str());
         parseError = "Invalid rulev2 found: " + RULE;
         return;
@@ -853,6 +859,33 @@ void CConfigManager::handleWindowRuleV2(const std::string& command, const std::s
 
     if (FLOATPOS != std::string::npos) {
         rule.bFloating = extract(FLOATPOS + 9) == "1" ? 1 : 0;
+    }
+
+    if (RULE == "unset") {
+        std::erase_if(m_dWindowRules, [&](const SWindowRule& other) {
+            if (!other.v2) {
+                return other.szClass == rule.szClass && !rule.szClass.empty();
+            } else {
+                if (!rule.szClass.empty() && rule.szClass != other.szClass) {
+                    return false;
+                }
+
+                if (!rule.szTitle.empty() && rule.szTitle != other.szTitle) {
+                    return false;
+                }
+
+                if (rule.bX11 != -1 && rule.bX11 != other.bX11) {
+                    return false;
+                }
+
+                if (rule.bFloating != -1 && rule.bFloating != other.bFloating) {
+                    return false;
+                }
+
+                return true;
+            }
+        });
+        return;
     }
 
     m_dWindowRules.push_back(rule);
@@ -1197,13 +1230,6 @@ void CConfigManager::loadConfigLoadVars() {
 
     // Calculate the internal vars
     configValues["general:main_mod_internal"].intValue = g_pKeybindManager->stringToModMask(configValues["general:main_mod"].strValue);
-    const auto DAMAGETRACKINGMODE = g_pHyprRenderer->damageTrackingModeFromStr(configValues["general:damage_tracking"].strValue);
-    if (DAMAGETRACKINGMODE != DAMAGE_TRACKING_INVALID)
-        configValues["general:damage_tracking_internal"].intValue = DAMAGETRACKINGMODE;
-    else {
-        parseError = "invalid value for general:damage_tracking, supported: full, monitor, none";
-        configValues["general:damage_tracking_internal"].intValue = DAMAGE_TRACKING_NONE;
-    }
 
     // parseError will be displayed next frame
     if (parseError != "")
