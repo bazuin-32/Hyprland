@@ -58,6 +58,7 @@ void CConfigManager::setDefaultVars() {
     configValues["misc:enable_swallow"].intValue = 0;
     configValues["misc:swallow_regex"].strValue = STRVAL_EMPTY;
     configValues["misc:focus_on_activate"].intValue = 0;
+    configValues["misc:no_direct_scanout"].intValue = 0;
 
     configValues["debug:int"].intValue = 0;
     configValues["debug:log_damage"].intValue = 0;
@@ -83,6 +84,7 @@ void CConfigManager::setDefaultVars() {
     configValues["decoration:shadow_render_power"].intValue = 3;
     configValues["decoration:shadow_ignore_window"].intValue = 1;
     configValues["decoration:shadow_offset"].vecValue = Vector2D();
+    configValues["decoration:shadow_scale"].floatValue = 1.f;
     configValues["decoration:col.shadow"].intValue = 0xee1a1a1a;
     configValues["decoration:col.shadow_inactive"].intValue = INT_MAX;
     configValues["decoration:dim_inactive"].intValue = 0;
@@ -104,6 +106,7 @@ void CConfigManager::setDefaultVars() {
     configValues["master:no_gaps_when_only"].intValue = 0;
 
     configValues["animations:enabled"].intValue = 1;
+    configValues["animations:use_resize_transitions"].intValue = 0;
     configValues["animations:speed"].floatValue = 7.f;
     configValues["animations:curve"].strValue = "default";
     configValues["animations:windows_style"].strValue = STRVAL_EMPTY;
@@ -385,62 +388,7 @@ void CConfigManager::configSetValueSafe(const std::string& COMMAND, const std::s
 
 void CConfigManager::handleRawExec(const std::string& command, const std::string& args) {
     // Exec in the background dont wait for it.
-
-    std::string toExec = args;
-
-    if (g_pXWaylandManager->m_sWLRXWayland)
-        toExec = std::string("WAYLAND_DISPLAY=") + std::string(g_pCompositor->m_szWLDisplaySocket) + " DISPLAY=" + std::string(g_pXWaylandManager->m_sWLRXWayland->display_name) + " " + toExec;
-    else
-        toExec = std::string("WAYLAND_DISPLAY=") + std::string(g_pCompositor->m_szWLDisplaySocket) + " " + toExec;
-
-    Debug::log(LOG, "Config executing %s", toExec.c_str());
-
-    int socket[2];
-    if (pipe(socket) != 0) {
-        Debug::log(LOG, "Unable to create pipe for fork");
-    }
-
-    pid_t child, grandchild;
-    child = fork();
-    if (child < 0) {
-        close(socket[0]);
-        close(socket[1]);
-        Debug::log(LOG, "Fail to create the first fork");
-        return;
-    }
-    if (child == 0) {
-        // run in child
-        grandchild = fork();
-
-        sigset_t set;
-        sigemptyset(&set);
-        sigprocmask(SIG_SETMASK, &set, NULL);
-
-        if (grandchild == 0) {
-            // run in grandchild
-            close(socket[0]);
-            close(socket[1]);
-            execl("/bin/sh", "/bin/sh", "-c", args.c_str(), nullptr);
-            // exit grandchild
-            _exit(0);
-        }
-        close(socket[0]);
-        write(socket[1], &grandchild, sizeof(grandchild));
-        close(socket[1]);
-        // exit child
-        _exit(0);
-    }
-    // run in parent
-    close(socket[1]);
-    read(socket[0], &grandchild, sizeof(grandchild));
-    close(socket[0]);
-    // clear child and leave child to init
-    waitpid(child, NULL, 0);
-    if (child < 0) {
-        Debug::log(LOG, "Fail to create the second fork");
-        return;
-    }
-    Debug::log(LOG, "Process created with pid %d", grandchild);
+    g_pKeybindManager->spawn(args);
 }
 
 void CConfigManager::handleMonitor(const std::string& command, const std::string& args) {
@@ -1070,7 +1018,7 @@ void CConfigManager::parseLine(std::string& line) {
     }
 
     size_t startPos = 0;
-    while ((startPos = line.find("##", startPos)) != std::string::npos) {
+    while ((startPos = line.find("##", startPos)) != std::string::npos && startPos < line.length() - 1 && startPos > 0) {
         line.replace(startPos, 2, "#");
         startPos++;
     }
@@ -1487,6 +1435,19 @@ std::vector<SWindowRule> CConfigManager::getMatchingRules(CWindow* pWindow) {
         returns.push_back(rule);
     }
 
+    const uint64_t PID = pWindow->getPID();
+    bool anyExecFound = false;
+
+    for (auto& er : execRequestedRules) {
+        if (er.iPid == PID) {
+            returns.push_back({er.szRule, "execRule"});
+            anyExecFound = true;
+        }
+    }
+
+    if (anyExecFound) // remove exec rules to unclog searches in the future, why have the garbage here.
+        execRequestedRules.erase(std::remove_if(execRequestedRules.begin(), execRequestedRules.end(), [&](const SExecRequestedRule& other) { return other.iPid == PID; }));
+
     return returns;
 }
 
@@ -1642,4 +1603,8 @@ CMonitor* CConfigManager::getBoundMonitorForWS(std::string wsname) {
     }
 
     return nullptr;
+}
+
+void CConfigManager::addExecRule(SExecRequestedRule rule) {
+    execRequestedRules.push_back(rule);
 }

@@ -38,6 +38,11 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
     m_pFoundSurfaceToFocus = nullptr;
     m_pFoundLSToFocus = nullptr;
     m_pFoundWindowToFocus = nullptr;
+    wlr_surface* foundSurface = nullptr;
+    Vector2D surfaceCoords;
+    Vector2D surfacePos = Vector2D(-1337, -1337);
+    CWindow* pFoundWindow = nullptr;
+    SLayerSurface* pFoundLayerSurface = nullptr;
 
     if (!g_pCompositor->m_bReadyToProcess || g_pCompositor->m_bIsShuttingDown)
         return;
@@ -46,9 +51,6 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
         Debug::log(ERR, "BUG THIS: Mouse move on mouse nullptr!");
         return;
     }
-
-    if (g_pCompositor->m_sSeat.mouse->virt)
-        return; // don't refocus on virt
 
     if (!g_pCompositor->m_bDPMSStateON && *PMOUSEDPMS) {
         // enable dpms
@@ -65,11 +67,9 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
 
     const auto PMONITOR = g_pCompositor->getMonitorFromCursor();
 
-    bool didConstraintOnCursor = false;
-
     // constraints
     // All constraints TODO: multiple mice?
-    if (g_pCompositor->m_sSeat.mouse->currentConstraint) {
+    if (g_pCompositor->m_sSeat.mouse->currentConstraint && !g_pCompositor->m_sSeat.exclusiveClient) {
         // XWayland windows sometimes issue constraints weirdly.
         // TODO: We probably should search their parent. wlr_xwayland_surface->parent
         const auto CONSTRAINTWINDOW = g_pCompositor->getConstraintWindow(g_pCompositor->m_sSeat.mouse);
@@ -99,15 +99,21 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
                     wlr_cursor_warp_closest(g_pCompositor->m_sWLRCursor, g_pCompositor->m_sSeat.mouse->mouse, newConstrainedCoords.x, newConstrainedCoords.y);
 
                     mouseCoords = newConstrainedCoords;
-
-                    didConstraintOnCursor = true;
                 }
             } else {
                 if ((!CONSTRAINTWINDOW->m_bIsX11 && PMONITOR && CONSTRAINTWINDOW->m_iWorkspaceID == PMONITOR->activeWorkspace) || (CONSTRAINTWINDOW->m_bIsX11)) {
                     g_pCompositor->m_sSeat.mouse->constraintActive = true;
-                    didConstraintOnCursor = true;
                 }
             }
+
+            if (CONSTRAINTWINDOW->m_bIsX11) {
+                foundSurface = g_pXWaylandManager->getWindowSurface(CONSTRAINTWINDOW);
+                surfacePos = CONSTRAINTWINDOW->m_vRealPosition.vec();
+            } else {
+                g_pCompositor->vectorWindowToSurface(mouseCoords, CONSTRAINTWINDOW, surfaceCoords);
+            }
+
+            pFoundWindow = CONSTRAINTWINDOW;
         }
     }
 
@@ -115,12 +121,6 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
     updateDragIcon();
 
     g_pLayoutManager->getCurrentLayout()->onMouseMove(getMouseCoordsInternal());
-
-    // focus
-    wlr_surface* foundSurface = nullptr;
-
-    if (didConstraintOnCursor)
-        return; // don't process when cursor constrained
 
     if (PMONITOR && PMONITOR != g_pCompositor->m_pLastMonitor) {
         g_pCompositor->m_pLastMonitor = PMONITOR;
@@ -133,11 +133,6 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
         // event
         g_pEventManager->postEvent(SHyprIPCEvent{"focusedmon", PMONITOR->szName + "," + ACTIVEWORKSPACE->m_szName});
     }
-
-    Vector2D surfaceCoords;
-    Vector2D surfacePos = Vector2D(-1337, -1337);
-    CWindow* pFoundWindow = nullptr;
-    SLayerSurface* pFoundLayerSurface = nullptr;
 
     // overlay is above fullscreen
     if (!foundSurface)
@@ -278,7 +273,7 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
                 if (*PFOLLOWMOUSE != 3 && allowKeyboardRefocus)
                     g_pCompositor->focusWindow(pFoundWindow, foundSurface);
                 wlr_seat_pointer_notify_enter(g_pCompositor->m_sSeat.seat, foundSurface, surfaceLocal.x, surfaceLocal.y);
-            } else if (*PFOLLOWMOUSE == 2) {
+            } else if (*PFOLLOWMOUSE == 2 || *PFOLLOWMOUSE == 3) {
                 wlr_seat_pointer_notify_enter(g_pCompositor->m_sSeat.seat, foundSurface, surfaceLocal.x, surfaceLocal.y);
             }
 
@@ -392,12 +387,16 @@ void CInputManager::processMouseDownNormal(wlr_pointer_button_event* e) {
     // notify the keybind manager
     static auto *const PPASSMOUSE = &g_pConfigManager->getConfigValuePtr("binds:pass_mouse_when_bound")->intValue;
     const auto PASS = g_pKeybindManager->onMouseEvent(e);
+    static auto *const PFOLLOWMOUSE = &g_pConfigManager->getConfigValuePtr("input:follow_mouse")->intValue;
 
     if (!PASS && !*PPASSMOUSE)
         return;
 
     switch (e->state) {
         case WLR_BUTTON_PRESSED:
+            if (*PFOLLOWMOUSE == 3) // don't refocus on full loose
+                break;
+
             if (!g_pCompositor->m_sSeat.mouse->currentConstraint)
                 refocus();
 
@@ -673,13 +672,13 @@ void CInputManager::newMouse(wlr_input_device* mouse, bool virt) {
         Debug::log(LOG, "New mouse has libinput sens %.2f (%.2f) with accel profile %i (%i)", libinput_device_config_accel_get_speed(LIBINPUTDEV), libinput_device_config_accel_get_default_speed(LIBINPUTDEV), libinput_device_config_accel_get_profile(LIBINPUTDEV), libinput_device_config_accel_get_default_profile(LIBINPUTDEV));
     }
 
-    setPointerConfigs();
-
-    PMOUSE->hyprListener_destroyMouse.initCallback(&mouse->events.destroy, &Events::listener_destroyMouse, PMOUSE, "Mouse");
-
     wlr_cursor_attach_input_device(g_pCompositor->m_sWLRCursor, mouse);
 
     PMOUSE->connected = true;
+
+    setPointerConfigs();
+
+    PMOUSE->hyprListener_destroyMouse.initCallback(&mouse->events.destroy, &Events::listener_destroyMouse, PMOUSE, "Mouse");
 
     g_pCompositor->m_sSeat.mouse = PMOUSE;
 
@@ -819,6 +818,31 @@ void CInputManager::destroyMouse(wlr_input_device* mouse) {
         unconstrainMouse();
 }
 
+
+void CInputManager::updateKeyboardsLeds(wlr_input_device* pKeyboard) {    
+    auto keyboard = wlr_keyboard_from_input_device(pKeyboard);
+    
+    if (keyboard->xkb_state == NULL) {
+		return;
+	}
+
+	uint32_t leds = 0;
+	for (uint32_t i = 0; i < WLR_LED_COUNT; ++i) {
+		if (xkb_state_led_index_is_active(keyboard->xkb_state,
+				keyboard->led_indexes[i])) {
+			leds |= (1 << i);
+		}
+	}
+    
+    for (auto& kb : m_lKeyboards) {
+        if ((kb.isVirtual && shouldIgnoreVirtualKeyboard(&kb)) || kb.keyboard == pKeyboard)
+            continue;
+
+        wlr_keyboard_led_update(wlr_keyboard_from_input_device(kb.keyboard), leds);
+    }
+}
+
+
 void CInputManager::onKeyboardKey(wlr_keyboard_key_event* e, SKeyboard* pKeyboard) {
     bool passEvent = g_pKeybindManager->onKeyEvent(e, pKeyboard);
 
@@ -835,6 +859,8 @@ void CInputManager::onKeyboardKey(wlr_keyboard_key_event* e, SKeyboard* pKeyboar
             wlr_seat_set_keyboard(g_pCompositor->m_sSeat.seat, wlr_keyboard_from_input_device(pKeyboard->keyboard));
             wlr_seat_keyboard_notify_key(g_pCompositor->m_sSeat.seat, e->time_msec, e->keycode, e->state);
         }
+
+        updateKeyboardsLeds(pKeyboard->keyboard);
     }
 }
 
@@ -854,6 +880,8 @@ void CInputManager::onKeyboardMod(void* data, SKeyboard* pKeyboard) {
         wlr_seat_keyboard_notify_modifiers(g_pCompositor->m_sSeat.seat, &MODS);
     }
 
+    updateKeyboardsLeds(pKeyboard->keyboard);
+
     const auto PWLRKB = wlr_keyboard_from_input_device(pKeyboard->keyboard);
 
     if (PWLRKB->modifiers.group != pKeyboard->activeLayout) {
@@ -861,6 +889,10 @@ void CInputManager::onKeyboardMod(void* data, SKeyboard* pKeyboard) {
 
         g_pEventManager->postEvent(SHyprIPCEvent{"activelayout", pKeyboard->name + "," + getActiveLayoutForKeyboard(pKeyboard)}, true); // force as this should ALWAYS be sent
 	}
+}
+
+bool CInputManager::shouldIgnoreVirtualKeyboard(SKeyboard* pKeyboard) {
+    return !pKeyboard || (m_sIMERelay.m_pKeyboardGrab && wl_resource_get_client(m_sIMERelay.m_pKeyboardGrab->pWlrKbGrab->resource) == wl_resource_get_client(wlr_input_device_get_virtual_keyboard(pKeyboard->keyboard)->resource));
 }
 
 void CInputManager::refocus() {
@@ -1004,7 +1036,7 @@ uint32_t CInputManager::accumulateModsFromAllKBs() {
     uint32_t finalMask = 0;
 
     for (auto& kb : m_lKeyboards) {
-        if (kb.isVirtual)
+        if (kb.isVirtual && shouldIgnoreVirtualKeyboard(&kb))
             continue;
 
         finalMask |= wlr_keyboard_get_modifiers(wlr_keyboard_from_input_device(kb.keyboard));

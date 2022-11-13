@@ -20,6 +20,16 @@ int CHyprMasterLayout::getNodesOnWorkspace(const int& ws) {
     return no;
 }
 
+int CHyprMasterLayout::getMastersOnWorkspace(const int& ws) {
+    int no = 0;
+    for (auto& n : m_lMasterNodesData) {
+        if (n.workspaceID == ws && n.isMaster)
+            no++;
+    }
+
+    return no;
+}
+
 std::string CHyprMasterLayout::getLayoutName() {
     return "Master";
 }
@@ -104,10 +114,12 @@ void CHyprMasterLayout::onWindowRemovedTiling(CWindow* pWindow) {
     if (pWindow->m_bIsFullscreen)
         g_pCompositor->setWindowFullscreen(pWindow, false, FULLSCREEN_FULL);
 
-    if (PNODE->isMaster) {
+    const auto MASTERSLEFT = getMastersOnWorkspace(PNODE->workspaceID);
+
+    if (PNODE->isMaster && MASTERSLEFT < 2) {
         // find new one
         for (auto& nd : m_lMasterNodesData) {
-            if (!nd.isMaster) {
+            if (!nd.isMaster && nd.workspaceID == PNODE->workspaceID) {
                 nd.isMaster = true;
                 break;
             }
@@ -115,6 +127,15 @@ void CHyprMasterLayout::onWindowRemovedTiling(CWindow* pWindow) {
     }
 
     m_lMasterNodesData.remove(*PNODE);
+
+    if (getMastersOnWorkspace(PNODE->workspaceID) == getNodesOnWorkspace(PNODE->workspaceID) && MASTERSLEFT > 1) {
+        for (auto it = m_lMasterNodesData.rbegin(); it != m_lMasterNodesData.rend(); it++) {
+            if (it->workspaceID == PNODE->workspaceID) {
+                it->isMaster = false;
+                break;
+            }
+        }
+    }
 
     recalculateMonitor(pWindow->m_iMonitorID);
 }
@@ -169,32 +190,52 @@ void CHyprMasterLayout::calculateWorkspace(const int& ws) {
     if (!PMASTERNODE)
         return;
 
+    const auto MASTERS = getMastersOnWorkspace(PWORKSPACE->m_iID);
+
     if (getNodesOnWorkspace(PWORKSPACE->m_iID) < 2) {
         PMASTERNODE->position = PMONITOR->vecReservedTopLeft + PMONITOR->vecPosition;
         PMASTERNODE->size = Vector2D(PMONITOR->vecSize.x - PMONITOR->vecReservedTopLeft.x - PMONITOR->vecReservedBottomRight.x, PMONITOR->vecSize.y - PMONITOR->vecReservedBottomRight.y - PMONITOR->vecReservedTopLeft.y);
         applyNodeDataToWindow(PMASTERNODE);
         return;
     } else {
-        PMASTERNODE->position = PMONITOR->vecReservedTopLeft + PMONITOR->vecPosition;
-        PMASTERNODE->size = Vector2D((PMONITOR->vecSize.x - PMONITOR->vecReservedTopLeft.x - PMONITOR->vecReservedBottomRight.x) * PMASTERNODE->percMaster, PMONITOR->vecSize.y - PMONITOR->vecReservedBottomRight.y - PMONITOR->vecReservedTopLeft.y);
+        float heightLeft = PMONITOR->vecSize.y - PMONITOR->vecReservedBottomRight.y - PMONITOR->vecReservedTopLeft.y;
+        int nodesLeft = MASTERS;
+        float nextY = 0;
+
+        for (auto& n : m_lMasterNodesData) {
+            if (n.workspaceID == PWORKSPACE->m_iID && n.isMaster) {
+                n.position = PMONITOR->vecReservedTopLeft + PMONITOR->vecPosition + Vector2D(0, nextY);
+                float HEIGHT = nodesLeft > 1 ? heightLeft / nodesLeft * n.percSize : heightLeft;
+                if (HEIGHT > heightLeft * 0.9f && nodesLeft > 1)
+                    HEIGHT = heightLeft * 0.9f;
+                n.size = Vector2D((PMONITOR->vecSize.x - PMONITOR->vecReservedTopLeft.x - PMONITOR->vecReservedBottomRight.x) * PMASTERNODE->percMaster, HEIGHT);
+
+                nodesLeft--;
+                heightLeft -= HEIGHT;
+                nextY += HEIGHT;
+
+                applyNodeDataToWindow(&n);
+            }
+        }
     }
 
-    const auto SLAVESIZE = 1.f / (getNodesOnWorkspace(PWORKSPACE->m_iID) - 1) * (PMASTERNODE->size.y);
-    int slavesDone = 0;
+    float heightLeft = PMONITOR->vecSize.y - PMONITOR->vecReservedBottomRight.y - PMONITOR->vecReservedTopLeft.y;
+    int slavesLeft = getNodesOnWorkspace(PWORKSPACE->m_iID) - MASTERS;
+    float nextY = 0;
 
     for (auto& nd : m_lMasterNodesData) {
-        if (nd.workspaceID != PWORKSPACE->m_iID)
+        if (nd.workspaceID != PWORKSPACE->m_iID || nd.isMaster)
             continue;
 
-        if (nd == *PMASTERNODE) {
-            applyNodeDataToWindow(PMASTERNODE);
-            continue;
-        }
+        nd.position = PMONITOR->vecReservedTopLeft + PMONITOR->vecPosition + Vector2D(PMASTERNODE->percMaster * PMONITOR->vecSize.x, nextY);
+        float HEIGHT = slavesLeft > 1 ? heightLeft / slavesLeft * nd.percSize : heightLeft;
+        if (HEIGHT > heightLeft * 0.9f && slavesLeft > 1)
+            HEIGHT = heightLeft * 0.9f;
+        nd.size = Vector2D(PMONITOR->vecSize.x - PMONITOR->vecReservedBottomRight.x - PMONITOR->vecReservedTopLeft.x - PMASTERNODE->size.x, HEIGHT);
 
-        nd.position = Vector2D(PMASTERNODE->size.x + PMASTERNODE->position.x, slavesDone * SLAVESIZE + PMASTERNODE->position.y);
-        nd.size = Vector2D(PMONITOR->vecSize.x - PMONITOR->vecReservedBottomRight.x - PMONITOR->vecReservedTopLeft.x - PMASTERNODE->size.x, SLAVESIZE);
-
-        slavesDone++;
+        slavesLeft--;
+        heightLeft -= HEIGHT;
+        nextY += HEIGHT;
 
         applyNodeDataToWindow(&nd);
     }
@@ -309,13 +350,12 @@ void CHyprMasterLayout::resizeActiveWindow(const Vector2D& pixResize, CWindow* p
     const auto PNODE = getNodeFromWindow(PWINDOW);
 
     if (!PNODE) {
-      PWINDOW->m_vRealSize = Vector2D(std::max((PWINDOW->m_vRealSize.goalv() + pixResize).x, 20.0), std::max((PWINDOW->m_vRealSize.goalv() + pixResize).y, 20.0));
+        PWINDOW->m_vRealSize = Vector2D(std::max((PWINDOW->m_vRealSize.goalv() + pixResize).x, 20.0), std::max((PWINDOW->m_vRealSize.goalv() + pixResize).y, 20.0));
         PWINDOW->updateWindowDecos();
         return;
     }
 
-    // get master
-    const auto PMASTER = getMasterNodeOnWorkspace(PWINDOW->m_iWorkspaceID);
+    // get monitor
     const auto PMONITOR = g_pCompositor->getMonitorFromID(PWINDOW->m_iMonitorID);
 
     if (getNodesOnWorkspace(PWINDOW->m_iWorkspaceID) < 2)
@@ -323,11 +363,24 @@ void CHyprMasterLayout::resizeActiveWindow(const Vector2D& pixResize, CWindow* p
 
     m_bForceWarps = true;
 
-    float delta = pixResize.x / PMONITOR->vecSize.x;
+    double delta = pixResize.x / PMONITOR->vecSize.x;
 
-    PMASTER->percMaster += delta;
+    for (auto& n : m_lMasterNodesData) {
+        if (n.isMaster)
+            n.percMaster = std::clamp(n.percMaster + delta, 0.05, 0.95);
+    }
 
-    std::clamp(PMASTER->percMaster, 0.05f, 0.95f);
+    // check the up/down resize
+    if (pixResize.y != 0) {
+        if (PNODE->isMaster && getMastersOnWorkspace(PNODE->workspaceID) > 1) {
+            // check master size
+            const auto SIZEY = (PMONITOR->vecSize.y - PMONITOR->vecReservedTopLeft.y - PMONITOR->vecReservedBottomRight.y) / getMastersOnWorkspace(PNODE->workspaceID);
+            PNODE->percSize = std::clamp(PNODE->percSize + pixResize.y / SIZEY, 0.05, 1.95);
+        } else if (!PNODE->isMaster && (getNodesOnWorkspace(PWINDOW->m_iWorkspaceID) - getMastersOnWorkspace(PNODE->workspaceID)) > 1) {
+            const auto SIZEY = (PMONITOR->vecSize.y - PMONITOR->vecReservedTopLeft.y - PMONITOR->vecReservedBottomRight.y) / getNodesOnWorkspace(PNODE->workspaceID);
+            PNODE->percSize = std::clamp(PNODE->percSize + pixResize.y / SIZEY, 0.05, 1.95);
+        }
+    }
 
     recalculateMonitor(PMONITOR->ID);
 
@@ -618,6 +671,64 @@ std::any CHyprMasterLayout::layoutMessage(SLayoutMessageHeader header, std::stri
             switchWindows(header.pWindow, PWINDOWTOSWAPWITH);
             g_pCompositor->focusWindow(header.pWindow);
         }
+    } else if (message == "addmaster") {
+        if (!g_pCompositor->windowValidMapped(header.pWindow))
+            return 0;
+
+        if (header.pWindow->m_bIsFloating)
+            return 0;
+
+        const auto PNODE   = getNodeFromWindow(header.pWindow);
+
+        const auto WINDOWS = getNodesOnWorkspace(header.pWindow->m_iWorkspaceID);
+        const auto MASTERS = getMastersOnWorkspace(header.pWindow->m_iWorkspaceID);
+
+        if (MASTERS + 2 > WINDOWS)
+            return 0;
+
+        if (!PNODE || PNODE->isMaster) {
+            // first non-master node
+            for (auto& n : m_lMasterNodesData) {
+                if (n.workspaceID == header.pWindow->m_iWorkspaceID && !n.isMaster) {
+                    n.isMaster = true;
+                    break;
+                }
+            }
+        } else {
+            PNODE->isMaster = true;
+        }
+
+        recalculateMonitor(header.pWindow->m_iMonitorID);
+
+    } else if (message == "removemaster") {
+
+        if (!g_pCompositor->windowValidMapped(header.pWindow))
+            return 0;
+
+        if (header.pWindow->m_bIsFloating)
+            return 0;
+
+        const auto PNODE = getNodeFromWindow(header.pWindow);
+
+        const auto WINDOWS = getNodesOnWorkspace(header.pWindow->m_iWorkspaceID);
+        const auto MASTERS = getMastersOnWorkspace(header.pWindow->m_iWorkspaceID);
+
+        if (WINDOWS < 2 || MASTERS < 2)
+            return 0;
+
+        if (!PNODE || !PNODE->isMaster) {
+            // first non-master node
+            for (auto it = m_lMasterNodesData.rbegin(); it != m_lMasterNodesData.rend(); it++) {
+                if (it->workspaceID == header.pWindow->m_iWorkspaceID && it->isMaster) {
+                    it->isMaster = false;
+                    break;
+                }
+            }
+        } else {
+            PNODE->isMaster = false;
+        }
+
+        recalculateMonitor(header.pWindow->m_iMonitorID);
     }
 
     return 0;

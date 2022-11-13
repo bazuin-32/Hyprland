@@ -33,6 +33,8 @@ void CAnimationManager::tick() {
 
     const auto DEFAULTBEZIER = m_mBezierCurves.find("default");
 
+    std::vector<CAnimatedVariable*> animationEndedVars;
+
     for (auto& av : m_lAnimatedVariables) {
 
         // first of all, check if we need to update it at all
@@ -40,16 +42,12 @@ void CAnimationManager::tick() {
             continue;
 
         if (av->m_eDamagePolicy == AVARDAMAGE_SHADOW && !*PSHADOWSENABLED) {
-            av->warp();
+            av->warp(false);
             continue;
         }
 
-        // get speed
-        const auto SPEED = av->m_pConfig->pValues->internalSpeed;
-
         // get the spent % (0 - 1)
-        const auto DURATIONPASSED = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - av->animationBegin).count();
-        const float SPENT = std::clamp((DURATIONPASSED / 100.f) / SPEED, 0.f, 1.f);
+        const float SPENT = av->getPercent();
 
         // window stuff
         const auto PWINDOW = (CWindow*)av->m_pWindow;
@@ -78,12 +76,12 @@ void CAnimationManager::tick() {
             case AVARTYPE_FLOAT: {
                 // for disabled anims just warp
                 if (av->m_pConfig->pValues->internalEnabled == 0 || animationsDisabled) {
-                    av->warp();
+                    av->warp(false);
                     break;
                 }
 
                 if (SPENT >= 1.f) {
-                    av->warp();
+                    av->warp(false);
                     break;
                 }
 
@@ -99,12 +97,12 @@ void CAnimationManager::tick() {
             case AVARTYPE_VECTOR: {
                 // for disabled anims just warp
                 if (av->m_pConfig->pValues->internalEnabled == 0 || animationsDisabled) {
-                    av->warp();
+                    av->warp(false);
                     break;
                 }
 
                 if (SPENT >= 1.f) {
-                    av->warp();
+                    av->warp(false);
                     break;
                 }
 
@@ -120,12 +118,12 @@ void CAnimationManager::tick() {
             case AVARTYPE_COLOR: {
                 // for disabled anims just warp
                 if (av->m_pConfig->pValues->internalEnabled == 0 || animationsDisabled) {
-                    av->warp();
+                    av->warp(false);
                     break;
                 }
 
                 if (SPENT >= 1.f) {
-                    av->warp();
+                    av->warp(false);
                     break;
                 }
 
@@ -166,8 +164,7 @@ void CAnimationManager::tick() {
                         g_pHyprOpenGL->markBlurDirtyForMonitor(PMONITOR);
                 }
                 break;
-            }
-            case AVARDAMAGE_BORDER: {
+            } case AVARDAMAGE_BORDER: {
                 RASSERT(PWINDOW, "Tried to AVARDAMAGE_BORDER a non-window AVAR!");
 
                 // damage only the border.
@@ -225,13 +222,21 @@ void CAnimationManager::tick() {
             }
         }
 
-
         // set size and pos if valid, but only if damage policy entire (dont if border for example)
         if (g_pCompositor->windowValidMapped(PWINDOW) && av->m_eDamagePolicy == AVARDAMAGE_ENTIRE && PWINDOW->m_iX11Type != 2)
             g_pXWaylandManager->setWindowSize(PWINDOW, PWINDOW->m_vRealSize.goalv());
 
         // manually schedule a frame
         g_pCompositor->scheduleFrameForMonitor(PMONITOR);
+
+        // check if we did not finish animating. If so, trigger onAnimationEnd.
+        if (!av->isBeingAnimated())
+            animationEndedVars.push_back(av);
+    }
+
+    // do it here, because if this alters the animation vars deque we would be in trouble above.
+    for (auto& ave : animationEndedVars) {
+        ave->onAnimationEnd();
     }
 }
 
@@ -287,7 +292,7 @@ void CAnimationManager::animationPopin(CWindow* pWindow, bool close, float minPe
 }
 
 void CAnimationManager::animationSlide(CWindow* pWindow, std::string force, bool close) {
-    pWindow->m_vRealSize.warp();  // size we preserve in slide
+    pWindow->m_vRealSize.warp(false);  // size we preserve in slide
 
     const auto GOALPOS = pWindow->m_vRealPosition.goalv();
     const auto GOALSIZE = pWindow->m_vRealSize.goalv();

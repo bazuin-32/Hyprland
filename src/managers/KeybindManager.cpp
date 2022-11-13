@@ -1,5 +1,7 @@
 #include "KeybindManager.hpp"
 
+#include <fcntl.h>
+#include <paths.h>
 #include <regex>
 
 CKeybindManager::CKeybindManager() {
@@ -16,6 +18,7 @@ CKeybindManager::CKeybindManager() {
     m_mDispatchers["pseudo"]                    = toggleActivePseudo;
     m_mDispatchers["movefocus"]                 = moveFocusTo;
     m_mDispatchers["movewindow"]                = moveActiveTo;
+    m_mDispatchers["centerwindow"]              = centerWindow;
     m_mDispatchers["togglegroup"]               = toggleGroup;
     m_mDispatchers["changegroupactive"]         = changeGroupActive;
     m_mDispatchers["togglesplit"]               = toggleSplit;
@@ -164,7 +167,7 @@ bool CKeybindManager::onKeyEvent(wlr_keyboard_key_event* e, SKeyboard* pKeyboard
         return true;
     }
 
-    if (pKeyboard->isVirtual)
+    if (pKeyboard->isVirtual && g_pInputManager->shouldIgnoreVirtualKeyboard(pKeyboard))
         return true;
 
     if (!m_pXKBTranslationState) {
@@ -482,6 +485,17 @@ bool CKeybindManager::handleInternalKeybinds(xkb_keysym_t keysym) {
 // Dispatchers
 
 void CKeybindManager::spawn(std::string args) {
+
+    args = removeBeginEndSpacesTabs(args);
+
+    std::string RULES = "";
+
+    if (args[0] == '[') {
+        // we have exec rules
+        RULES = args.substr(1, args.substr(1).find_first_of(']'));
+        args = args.substr(args.find_first_of(']') + 1);
+    }
+
     if (g_pXWaylandManager->m_sWLRXWayland)
         args = "WAYLAND_DISPLAY=" + std::string(g_pCompositor->m_szWLDisplaySocket) + " DISPLAY=" + std::string(g_pXWaylandManager->m_sWLRXWayland->display_name) + " " + args;
     else
@@ -514,6 +528,25 @@ void CKeybindManager::spawn(std::string args) {
             // run in grandchild
             close(socket[0]);
             close(socket[1]);
+            close(STDOUT_FILENO);
+            close(STDERR_FILENO);
+
+            int devnull = open(_PATH_DEVNULL, O_WRONLY);
+            if (devnull == -1) {
+                Debug::log(LOG, "Unable to open /dev/null for writing");
+                return;
+            }
+
+            if (dup2(devnull, STDOUT_FILENO) == -1) {
+                Debug::log(LOG, "Unable to duplicate /dev/null to stdout");
+                return;
+            }
+            if (dup2(devnull, STDERR_FILENO) == -1) {
+                Debug::log(LOG, "Unable to duplicate /dev/null to stderr");
+                return;
+            }
+
+            close(devnull);
             execl("/bin/sh", "/bin/sh", "-c", args.c_str(), nullptr);
             // exit grandchild
             _exit(0);
@@ -534,7 +567,18 @@ void CKeybindManager::spawn(std::string args) {
         Debug::log(LOG, "Fail to create the second fork");
         return;
     }
+
     Debug::log(LOG, "Process Created with pid %d", grandchild);
+
+    if (!RULES.empty()) {
+        const auto RULESLIST = CVarList(RULES, 0, ';');
+
+        for (auto& r : RULESLIST) {
+            g_pConfigManager->addExecRule({r, (unsigned long)grandchild});
+        }
+
+        Debug::log(LOG, "Applied %i rule arguments for exec.", RULESLIST.size());
+    }
 }
 
 void CKeybindManager::killActive(std::string args) {
@@ -579,6 +623,18 @@ void CKeybindManager::toggleActiveFloating(std::string args) {
     g_pLayoutManager->getCurrentLayout()->changeWindowFloatingMode(PWINDOW);
 }
 
+void CKeybindManager::centerWindow(std::string args) {
+    const auto PWINDOW = g_pCompositor->m_pLastWindow;
+
+    if (!PWINDOW || !PWINDOW->m_bIsFloating || PWINDOW->m_bIsFullscreen)
+        return;
+
+    const auto PMONITOR = g_pCompositor->getMonitorFromID(PWINDOW->m_iMonitorID);
+
+    PWINDOW->m_vRealPosition = PMONITOR->vecPosition + PMONITOR->vecSize / 2.f - PWINDOW->m_vRealSize.goalv() / 2.f;
+    PWINDOW->m_vPosition = PWINDOW->m_vRealPosition.goalv();
+}
+
 void CKeybindManager::toggleActivePseudo(std::string args) {
     const auto ACTIVEWINDOW = g_pCompositor->m_pLastWindow;
 
@@ -617,7 +673,7 @@ void CKeybindManager::changeworkspace(std::string args) {
             return;
         } else {
             workspaceToChangeTo = PCURRENTWORKSPACE->m_iPrevWorkspaceID;
-            
+
             if (const auto PWORKSPACETOCHANGETO = g_pCompositor->getWorkspaceByID(workspaceToChangeTo); PWORKSPACETOCHANGETO)
                 workspaceName = PWORKSPACETOCHANGETO->m_szName;
             else
@@ -650,7 +706,7 @@ void CKeybindManager::changeworkspace(std::string args) {
         const auto PPREVWORKSPACE = g_pCompositor->getWorkspaceByID(PCURRENTWORKSPACE->m_iPrevWorkspaceID);
 
         workspaceToChangeTo = PCURRENTWORKSPACE->m_iPrevWorkspaceID;
-        
+
         if (PPREVWORKSPACE)
             workspaceName = PPREVWORKSPACE->m_szName;
         else

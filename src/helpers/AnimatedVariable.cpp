@@ -12,8 +12,6 @@ void CAnimatedVariable::create(ANIMATEDVARTYPE type, SAnimationPropertyConfig* p
     m_pConfig = pAnimConfig;
     m_pWindow = pWindow;
 
-    g_pAnimationManager->m_lAnimatedVariables.push_back(this);
-
     m_bDummy = false;
 }
 
@@ -56,8 +54,20 @@ CAnimatedVariable::~CAnimatedVariable() {
 
 void CAnimatedVariable::unregister() {
     g_pAnimationManager->m_lAnimatedVariables.remove(this);
+    m_bIsRegistered = false;
+}
+
+void CAnimatedVariable::registerVar() {
+    if (!m_bIsRegistered)
+        g_pAnimationManager->m_lAnimatedVariables.push_back(this);
+    m_bIsRegistered = true;
 }
 
 int CAnimatedVariable::getDurationLeftMs() {
     return std::max((int)(m_pConfig->pValues->internalSpeed * 100) - (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - animationBegin).count(), 0);
+}
+
+float CAnimatedVariable::getPercent() {
+    const auto DURATIONPASSED = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - animationBegin).count();
+    return std::clamp((DURATIONPASSED / 100.f) / m_pConfig->pValues->internalSpeed, 0.f, 1.f);
 }

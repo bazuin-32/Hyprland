@@ -73,7 +73,15 @@ CCompositor::CCompositor() {
         throw std::runtime_error("wlr_gles2_renderer_create_with_drm_fd() failed!");
     }
 
-    wlr_renderer_init_wl_display(m_sWLRRenderer, m_sWLDisplay);
+    wlr_renderer_init_wl_shm(m_sWLRRenderer, m_sWLDisplay);
+
+    if (wlr_renderer_get_dmabuf_texture_formats(m_sWLRRenderer)) {
+        if (wlr_renderer_get_drm_fd(m_sWLRRenderer) >= 0) {
+            wlr_drm_create(m_sWLDisplay, m_sWLRRenderer);
+        }
+
+        m_sWLRLinuxDMABuf = wlr_linux_dmabuf_v1_create(m_sWLDisplay, m_sWLRRenderer);
+    }
 
     m_sWLRAllocator = wlr_allocator_autocreate(m_sWLRBackend, m_sWLRRenderer);
 
@@ -172,6 +180,15 @@ CCompositor::CCompositor() {
     m_sWLRIMEMgr = wlr_input_method_manager_v2_create(m_sWLDisplay);
 
     m_sWLRActivation = wlr_xdg_activation_v1_create(m_sWLDisplay);
+
+    m_sWLRHeadlessBackend = wlr_headless_backend_create(m_sWLDisplay);
+
+    if (!m_sWLRHeadlessBackend) {
+        Debug::log(CRIT, "Couldn't create the headless backend");
+        throw std::runtime_error("wlr_headless_backend_create() failed!");
+    }
+
+    wlr_multi_backend_add(m_sWLRBackend, m_sWLRHeadlessBackend);
 }
 
 CCompositor::~CCompositor() {
@@ -339,6 +356,9 @@ void CCompositor::startCompositor() {
     setenv("WAYLAND_DISPLAY", m_szWLDisplaySocket, 1);
 
     signal(SIGPIPE, SIG_IGN);
+
+    if (m_sWLRSession /* Session-less Hyprland usually means a nest, don't update the env in that case */ && fork() == 0)
+        execl("/bin/sh", "/bin/sh", "-c", "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE", nullptr);
 
     Debug::log(LOG, "Running on WAYLAND_DISPLAY: %s", m_szWLDisplaySocket);
 
@@ -1516,7 +1536,40 @@ void CCompositor::swapActiveWorkspaces(CMonitor* pMonitorA, CMonitor* pMonitorB)
 }
 
 CMonitor* CCompositor::getMonitorFromString(const std::string& name) {
-    if (isNumber(name)) {
+    if (name[0] == '+' || name[0] == '-') {
+        // relative
+        const auto OFFSET = name[0] == '-' ? name : name.substr(1);
+
+        if (!isNumber(OFFSET)) {
+            Debug::log(ERR, "Error in getMonitorFromString: Not a number in relative.");
+            return nullptr;
+        }
+
+        int offsetLeft = std::stoi(OFFSET) % m_vMonitors.size(); // no need to cycle more
+
+        int currentPlace = 0;
+        for (int i = 0; i < (int)m_vMonitors.size(); i++) {
+            if (m_vMonitors[i].get() == m_pLastMonitor) {
+                currentPlace = i;
+                break;
+            }
+        }
+
+        currentPlace += offsetLeft;
+
+        if (currentPlace < 0) {
+            currentPlace = m_vMonitors.size() - currentPlace;
+        } else {
+            currentPlace = currentPlace % m_vMonitors.size();
+        }
+
+        if (currentPlace != std::clamp(currentPlace, 0, (int)m_vMonitors.size())) {
+            Debug::log(WARN, "Error in getMonitorFromString: Vaxry's code sucks.");
+            currentPlace = std::clamp(currentPlace, 0, (int)m_vMonitors.size());
+        }
+
+        return m_vMonitors[currentPlace].get();
+    } else if (isNumber(name)) {
         // change by ID
         int monID = -1;
         try {
@@ -1696,6 +1749,9 @@ void CCompositor::setWindowFullscreen(CWindow* pWindow, bool on, eFullscreenMode
     forceReportSizesToWindowsOnWorkspace(pWindow->m_iWorkspaceID);
 
     g_pInputManager->recheckIdleInhibitorStatus();
+
+    // DMAbuf stuff for direct scanout
+    g_pHyprRenderer->setWindowScanoutMode(pWindow);
 }
 
 void CCompositor::moveUnmanagedX11ToWindows(CWindow* pWindow) {

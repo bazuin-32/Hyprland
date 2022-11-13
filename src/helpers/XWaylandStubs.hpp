@@ -133,6 +133,11 @@ struct wlr_xwayland_surface_configure_event {
     uint16_t mask;  // xcb_config_window_t
 };
 
+struct wlr_xwayland_minimize_event {
+    struct wlr_xwayland_surface *surface;
+    bool minimize;
+};
+
 inline void wlr_xwayland_destroy(wlr_xwayland*) { }
 
 inline void wlr_xwayland_surface_configure(wlr_xwayland_surface*, int, int, int, int) { }
@@ -149,4 +154,8 @@ inline void wlr_xwayland_surface_close(wlr_xwayland_surface*) { }
 
 inline void wlr_xwayland_surface_set_fullscreen(wlr_xwayland_surface*, bool) { }
 
-inline void wlr_xwayland_surface_set_minimized(wlr_xwayland_surface *, bool) {}
+inline void wlr_xwayland_surface_set_minimized(wlr_xwayland_surface *, bool) { }
+
+inline bool wlr_backend_is_x11(void*) { return false; }
+
+inline void wlr_x11_output_create(void*) { }

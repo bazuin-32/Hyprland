@@ -168,8 +168,11 @@ int dispatchRequest(int argc, char** argv) {
 
     std::string rq = "/dispatch";
 
-    for(int i = 2; i < argc; i++)
+    for(int i = 2; i < argc; i++) {
+        if (!strcmp(argv[i], "--"))
+            continue;
         rq += " " + std::string(argv[i]);
+    }
 
     request(rq);
     return 0;
@@ -217,6 +220,21 @@ int setcursorRequest(int argc, char** argv) {
     return 0;
 }
 
+int outputRequest(int argc, char** argv) {
+    if (argc < 4) {
+        std::cout << "Usage: hyprctl output <mode> <name>\n\
+            creates / destroys a fake output\n\
+            with create, name is the backend name to use (available: auto, x11, wayland, headless)\n\
+            with destroy, name is the output name to destroy";
+        return 1;
+    }
+
+    std::string rq = "output " + std::string(argv[2]) + " " + std::string(argv[3]);
+
+    request(rq);
+    return 0;
+}
+
 void batchRequest(std::string arg) {
     std::string rq = "[[BATCH]]" + arg.substr(arg.find_first_of(" ") + 1);
 
@@ -233,11 +251,14 @@ std::deque<std::string> splitArgs(int argc, char** argv) {
 }
 
 bool isNumber(const std::string& str, bool allowfloat) {
+    if (str.empty())
+        return false;
     return std::ranges::all_of(str.begin(), str.end(), [&](char c) { return isdigit(c) != 0 || c == '-' || (allowfloat && c == '.'); });
 }
 
 int main(int argc, char** argv) {
     int bflag = 0, sflag = 0, index, c;
+    bool parseArgs = true;
 
     if (argc < 2) {
         printf("%s\n", USAGE.c_str());
@@ -249,7 +270,12 @@ int main(int argc, char** argv) {
     const auto ARGS = splitArgs(argc, argv);
 
     for (auto i = 0; i < ARGS.size(); ++i) {
-        if (ARGS[i][0] == '-' && !isNumber(ARGS[i], true) /* For stuff like -2 */) {
+        if (ARGS[i] == "--") {
+            // Stop parsing arguments after --
+            parseArgs = false;
+            continue;
+        }
+        if (parseArgs && (ARGS[i][0] == '-') && !isNumber(ARGS[i], true) /* For stuff like -2 */) {
             // parse
             if (ARGS[i] == "-j" && !fullArgs.contains("j")) {
                 fullArgs += "j";
@@ -290,6 +316,7 @@ int main(int argc, char** argv) {
     else if (fullRequest.contains("/reload")) request(fullRequest);
     else if (fullRequest.contains("/getoption")) request(fullRequest);
     else if (fullRequest.contains("/cursorpos")) request(fullRequest);
+    else if (fullRequest.contains("/output")) exitStatus = outputRequest(argc, argv);
     else if (fullRequest.contains("/setcursor")) exitStatus = setcursorRequest(argc, argv);
     else if (fullRequest.contains("/dispatch")) exitStatus = dispatchRequest(argc, argv);
     else if (fullRequest.contains("/keyword")) exitStatus = keywordRequest(argc, argv);

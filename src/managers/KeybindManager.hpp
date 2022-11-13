@@ -7,6 +7,7 @@
 #include <functional>
 
 class CInputManager;
+class CConfigManager;
 
 struct SKeybind {
     std::string       key = "";
@@ -92,6 +93,7 @@ private:
     static void         moveActiveToWorkspace(std::string);
     static void         moveActiveToWorkspaceSilent(std::string);
     static void         moveFocusTo(std::string);
+    static void         centerWindow(std::string);
     static void         moveActiveTo(std::string);
     static void         toggleGroup(std::string);
     static void         changeGroupActive(std::string);
@@ -124,6 +126,7 @@ private:
 
     friend class CCompositor;
     friend class CInputManager;
+    friend class CConfigManager;
 };
 
 inline std::unique_ptr<CKeybindManager> g_pKeybindManager;
