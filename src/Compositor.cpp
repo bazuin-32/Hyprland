@@ -1415,7 +1415,9 @@ void CCompositor::updateWindowAnimatedDecorationValues(CWindow* pWindow) {
     if (RENDERDATA.isBorderColor)
         pWindow->m_cRealBorderColor = RENDERDATA.borderColor;
     else
-        pWindow->m_cRealBorderColor = CColor(pWindow == m_pLastWindow ? *ACTIVECOL : *INACTIVECOL);
+        pWindow->m_cRealBorderColor = CColor(pWindow == m_pLastWindow ?
+                                                        (pWindow->m_sSpecialRenderData.activeBorderColor >= 0 ? pWindow->m_sSpecialRenderData.activeBorderColor : *ACTIVECOL) :
+                                                        (pWindow->m_sSpecialRenderData.inactiveBorderColor >= 0 ? pWindow->m_sSpecialRenderData.inactiveBorderColor : *INACTIVECOL));
 
 
     // opacity
@@ -1729,6 +1731,9 @@ void CCompositor::setWindowFullscreen(CWindow* pWindow, bool on, eFullscreenMode
     g_pLayoutManager->getCurrentLayout()->fullscreenRequestForWindow(pWindow, mode, on);
 
     g_pXWaylandManager->setWindowFullscreen(pWindow, pWindow->m_bIsFullscreen && mode == FULLSCREEN_FULL);
+
+    pWindow->updateDynamicRules();
+    g_pCompositor->updateWindowAnimatedDecorationValues(pWindow);
 
     // make all windows on the same workspace under the fullscreen window
     for (auto& w : g_pCompositor->m_vWindows) {

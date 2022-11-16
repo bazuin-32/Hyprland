@@ -1,7 +1,5 @@
 #include "KeybindManager.hpp"
 
-#include <fcntl.h>
-#include <paths.h>
 #include <regex>
 
 CKeybindManager::CKeybindManager() {
@@ -528,25 +526,6 @@ void CKeybindManager::spawn(std::string args) {
             // run in grandchild
             close(socket[0]);
             close(socket[1]);
-            close(STDOUT_FILENO);
-            close(STDERR_FILENO);
-
-            int devnull = open(_PATH_DEVNULL, O_WRONLY);
-            if (devnull == -1) {
-                Debug::log(LOG, "Unable to open /dev/null for writing");
-                return;
-            }
-
-            if (dup2(devnull, STDOUT_FILENO) == -1) {
-                Debug::log(LOG, "Unable to duplicate /dev/null to stdout");
-                return;
-            }
-            if (dup2(devnull, STDERR_FILENO) == -1) {
-                Debug::log(LOG, "Unable to duplicate /dev/null to stderr");
-                return;
-            }
-
-            close(devnull);
             execl("/bin/sh", "/bin/sh", "-c", args.c_str(), nullptr);
             // exit grandchild
             _exit(0);
@@ -619,6 +598,8 @@ void CKeybindManager::toggleActiveFloating(std::string args) {
         return;
 
     PWINDOW->m_bIsFloating = !PWINDOW->m_bIsFloating;
+
+    PWINDOW->updateDynamicRules();
 
     g_pLayoutManager->getCurrentLayout()->changeWindowFloatingMode(PWINDOW);
 }
@@ -701,7 +682,7 @@ void CKeybindManager::changeworkspace(std::string args) {
     const auto PCURRENTWORKSPACE = g_pCompositor->getWorkspaceByID(g_pCompositor->m_pLastMonitor->activeWorkspace);
     static auto *const PBACKANDFORTH = &g_pConfigManager->getConfigValuePtr("binds:workspace_back_and_forth")->intValue;
 
-    if (*PBACKANDFORTH && PCURRENTWORKSPACE->m_iID == workspaceToChangeTo && PCURRENTWORKSPACE->m_iPrevWorkspaceID != -1 && !internal) {
+    if (*PBACKANDFORTH && PCURRENTWORKSPACE && PCURRENTWORKSPACE->m_iID == workspaceToChangeTo && PCURRENTWORKSPACE->m_iPrevWorkspaceID != -1 && !internal) {
 
         const auto PPREVWORKSPACE = g_pCompositor->getWorkspaceByID(PCURRENTWORKSPACE->m_iPrevWorkspaceID);
 
@@ -720,7 +701,7 @@ void CKeybindManager::changeworkspace(std::string args) {
         if (!*PALLOWWORKSPACECYCLES)
             PCURRENTWORKSPACE->m_iPrevWorkspaceID = -1;
 
-    } else if (PCURRENTWORKSPACE->m_iID == workspaceToChangeTo && !internal)
+    } else if (PCURRENTWORKSPACE && PCURRENTWORKSPACE->m_iID == workspaceToChangeTo && !internal)
         return;
 
     // remove constraints
@@ -1486,7 +1467,7 @@ void CKeybindManager::circleNext(std::string arg) {
         if (PWINDOWTOCHANGETO == g_pCompositor->m_pLastWindow || !PWINDOWTOCHANGETO)
             return;
 
-        if (g_pCompositor->m_pLastWindow->m_iWorkspaceID == PWINDOWTOCHANGETO->m_iWorkspaceID && g_pCompositor->m_pLastWindow->m_bIsFullscreen) {
+        if (g_pCompositor->m_pLastWindow && g_pCompositor->m_pLastWindow->m_iWorkspaceID == PWINDOWTOCHANGETO->m_iWorkspaceID && g_pCompositor->m_pLastWindow->m_bIsFullscreen) {
             const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(g_pCompositor->m_pLastWindow->m_iWorkspaceID);
             const auto FSMODE = PWORKSPACE->m_efFullscreenMode;
 
@@ -1727,6 +1708,9 @@ void CKeybindManager::pinActive(std::string args) {
 
     g_pCompositor->m_pLastWindow->m_bPinned = !g_pCompositor->m_pLastWindow->m_bPinned;
     g_pCompositor->m_pLastWindow->m_iWorkspaceID = g_pCompositor->getMonitorFromID(g_pCompositor->m_pLastWindow->m_iMonitorID)->activeWorkspace;
+
+    g_pCompositor->m_pLastWindow->updateDynamicRules();
+    g_pCompositor->updateWindowAnimatedDecorationValues(g_pCompositor->m_pLastWindow);
 
     const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(g_pCompositor->m_pLastWindow->m_iWorkspaceID);
 
