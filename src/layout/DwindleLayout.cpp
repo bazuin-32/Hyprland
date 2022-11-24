@@ -188,7 +188,7 @@ void CHyprDwindleLayout::applyNodeDataToWindow(SDwindleNodeData* pNode, bool for
 
     const auto NODESONWORKSPACE = getNodesOnWorkspace(PWINDOW->m_iWorkspaceID);
 
-    if (*PNOGAPSWHENONLY && PWINDOW->m_iWorkspaceID != SPECIAL_WORKSPACE_ID && (NODESONWORKSPACE == 1 || (pNode->isGroupMember() && pNode->getGroupMemberCount() == NODESONWORKSPACE))) {
+    if (*PNOGAPSWHENONLY && PWINDOW->m_iWorkspaceID != SPECIAL_WORKSPACE_ID && (NODESONWORKSPACE == 1 || (pNode->isGroupMember() && pNode->getGroupMemberCount() == NODESONWORKSPACE) || (PWINDOW->m_bIsFullscreen && g_pCompositor->getWorkspaceByID(PWINDOW->m_iWorkspaceID)->m_efFullscreenMode == FULLSCREEN_MAXIMIZED))) {
         PWINDOW->m_vRealPosition = calcPos - Vector2D(*PBORDERSIZE, *PBORDERSIZE);
         PWINDOW->m_vRealSize = calcSize + Vector2D(2 * *PBORDERSIZE, 2 * *PBORDERSIZE);
 
@@ -1008,6 +1008,8 @@ void CHyprDwindleLayout::switchGroupWindow(CWindow* pWindow, bool forward, CWind
 
     pNewNode->pWindow->updateWindowDecos();
     PNODE->pWindow->updateWindowDecos();
+
+    g_pHyprRenderer->damageMonitor(g_pCompositor->getMonitorFromID(PWORKSPACE->m_iMonitorID));
 }
 
 SWindowRenderLayoutHints CHyprDwindleLayout::requestRenderHints(CWindow* pWindow) {

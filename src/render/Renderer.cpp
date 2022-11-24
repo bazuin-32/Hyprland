@@ -228,7 +228,6 @@ void CHyprRenderer::renderWindow(CWindow* pWindow, CMonitor* pMonitor, timespec*
     const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(pWindow->m_iWorkspaceID);
     const auto REALPOS = pWindow->m_vRealPosition.vec() + (pWindow->m_bPinned ? Vector2D{} : PWORKSPACE->m_vRenderOffset.vec());
     static auto *const PNOFLOATINGBORDERS = &g_pConfigManager->getConfigValuePtr("general:no_border_on_floating")->intValue;
-    static auto *const PTRANSITIONS = &g_pConfigManager->getConfigValuePtr("animations:use_resize_transitions")->intValue;
 
     SRenderData renderdata = {pMonitor->output, time, REALPOS.x, REALPOS.y};
     if (ignorePosition) {
@@ -294,25 +293,6 @@ void CHyprRenderer::renderWindow(CWindow* pWindow, CMonitor* pMonitor, timespec*
                 wd->draw(pMonitor, renderdata.alpha * renderdata.fadeAlpha / 255.f, offset);
 
         wlr_surface_for_each_surface(g_pXWaylandManager->getWindowSurface(pWindow), renderSurface, &renderdata);
-
-        if (*PTRANSITIONS && !ignorePosition /* ignorePosition probably means we are rendering the snapshot rn */) {
-            const auto PFB = g_pHyprOpenGL->m_mWindowResizeFramebuffers.find(pWindow);
-
-            if (PFB != g_pHyprOpenGL->m_mWindowResizeFramebuffers.end() && PFB->second.isAllocated()) {
-                wlr_box box = {renderdata.x - pMonitor->vecPosition.x, renderdata.y - pMonitor->vecPosition.y, renderdata.w, renderdata.h};
-
-                // adjust UV (remove when I figure out how to change the size of the fb)
-                g_pHyprOpenGL->m_RenderData.primarySurfaceUVTopLeft = {0, 0};
-                g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight = { pWindow->m_vRealSize.m_vBegun.x / pMonitor->vecPixelSize.x, pWindow->m_vRealSize.m_vBegun.y / pMonitor->vecPixelSize.y};
-
-                g_pHyprOpenGL->m_bEndFrame = true;
-                g_pHyprOpenGL->renderTexture(PFB->second.m_cTex, &box, (1.f - pWindow->m_vRealSize.getPercent()) * 84.f, 0, false, true);
-                g_pHyprOpenGL->m_bEndFrame = false;
-
-                g_pHyprOpenGL->m_RenderData.primarySurfaceUVTopLeft = Vector2D(-1, -1);
-                g_pHyprOpenGL->m_RenderData.primarySurfaceUVBottomRight = Vector2D(-1, -1);
-            }
-        }
 
         if (renderdata.decorate && pWindow->m_sSpecialRenderData.border) {
             static auto *const PROUNDING = &g_pConfigManager->getConfigValuePtr("decoration:rounding")->intValue;
@@ -408,6 +388,8 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
         return;
     }
 
+    CWindow* lastWindow = nullptr;
+
     // Non-floating main
     for (auto& w : g_pCompositor->m_vWindows) {
         if (w->isHidden() && !w->m_bIsMapped && !w->m_bFadingOut)
@@ -421,10 +403,19 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
 
         if (!shouldRenderWindow(w.get(), PMONITOR))
             continue;
+        
+        // render active window after all others of this pass
+        if (w.get() == g_pCompositor->m_pLastWindow) {
+            lastWindow = w.get();
+            continue;
+        }
 
         // render the bad boy
         renderWindow(w.get(), PMONITOR, time, true, RENDER_PASS_MAIN);
     }
+
+    if (lastWindow)
+        renderWindow(lastWindow, PMONITOR, time, true, RENDER_PASS_MAIN);
 
     // Non-floating popup
     for (auto& w : g_pCompositor->m_vWindows) {
@@ -1143,6 +1134,9 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
     wlr_output_set_scale(pMonitor->output, pMonitorRule->scale);
     pMonitor->scale = pMonitorRule->scale;
 
+    wlr_output_set_transform(pMonitor->output, pMonitorRule->transform);
+    pMonitor->transform = pMonitorRule->transform;
+
     // loop over modes and choose an appropriate one.
     if (pMonitorRule->resolution != Vector2D() && pMonitorRule->resolution != Vector2D(-1,-1) && pMonitorRule->resolution != Vector2D(-1,-2)) {
         if (!wl_list_empty(&pMonitor->output->modes)) {
@@ -1339,9 +1333,6 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
 
     pMonitor->vrrActive = pMonitor->output->pending.adaptive_sync_enabled;  // disabled here, will be tested in CConfigManager::ensureVRR()
 
-    wlr_output_set_transform(pMonitor->output, pMonitorRule->transform);
-    pMonitor->transform = pMonitorRule->transform;
-
     pMonitor->vecPixelSize = pMonitor->vecSize;
 
     if (pMonitorRule->enable10bit) {
@@ -1371,7 +1362,6 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
 
     if (!wlr_output_commit(pMonitor->output)) {
         Debug::log(ERR, "Couldn't commit output named %s", pMonitor->output->name);
-        return true;
     }
 
     int x, y;
@@ -1404,14 +1394,11 @@ bool CHyprRenderer::applyMonitorRule(CMonitor* pMonitor, SMonitorRule* pMonitorR
         pMonitor->vecPosition = pMonitorRule->offset;
     }
 
-    wlr_output_enable(pMonitor->output, true);
-
     // update renderer (here because it will call rollback, so we cannot do this before committing)
     g_pHyprOpenGL->destroyMonitorResources(pMonitor);
 
     // updato wlroots
     wlr_output_layout_add(g_pCompositor->m_sWLROutputLayout, pMonitor->output, (int)pMonitor->vecPosition.x, (int)pMonitor->vecPosition.y);
-    Events::listener_change(nullptr, nullptr);
 
     // updato us
     arrangeLayersForMonitor(pMonitor->ID);

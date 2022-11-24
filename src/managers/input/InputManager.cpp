@@ -73,6 +73,7 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
         // XWayland windows sometimes issue constraints weirdly.
         // TODO: We probably should search their parent. wlr_xwayland_surface->parent
         const auto CONSTRAINTWINDOW = g_pCompositor->getConstraintWindow(g_pCompositor->m_sSeat.mouse);
+        const auto PCONSTRAINT = g_pCompositor->m_sSeat.mouse->currentConstraint;
 
         if (!CONSTRAINTWINDOW) {
             unconstrainMouse();
@@ -82,27 +83,26 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
             const auto CONSTRAINTPOS = CONSTRAINTWINDOW->m_bIsX11 ? Vector2D(CONSTRAINTWINDOW->m_uSurface.xwayland->x, CONSTRAINTWINDOW->m_uSurface.xwayland->y) : CONSTRAINTWINDOW->m_vRealPosition.vec();
             const auto CONSTRAINTSIZE = CONSTRAINTWINDOW->m_bIsX11 ? Vector2D(CONSTRAINTWINDOW->m_uSurface.xwayland->width, CONSTRAINTWINDOW->m_uSurface.xwayland->height) : CONSTRAINTWINDOW->m_vRealSize.vec();
 
-            if (!VECINRECT(mouseCoords, CONSTRAINTPOS.x, CONSTRAINTPOS.y, CONSTRAINTPOS.x + CONSTRAINTSIZE.x - 1.0, CONSTRAINTPOS.y + CONSTRAINTSIZE.y - 1.0)) {
-                if (g_pCompositor->m_sSeat.mouse->constraintActive) {
-                    Vector2D newConstrainedCoords = mouseCoords;
+            if (g_pCompositor->m_sSeat.mouse->currentConstraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+                // we just snap the cursor to where it should be.
 
-                    if (mouseCoords.x < CONSTRAINTPOS.x)
-                        newConstrainedCoords.x = CONSTRAINTPOS.x;
-                    else if (mouseCoords.x >= CONSTRAINTPOS.x + CONSTRAINTSIZE.x)
-                        newConstrainedCoords.x = CONSTRAINTPOS.x + CONSTRAINTSIZE.x - 1.0;
+                Vector2D hint = { PCONSTRAINT->current.cursor_hint.x, PCONSTRAINT->current.cursor_hint.y };
 
-                    if (mouseCoords.y < CONSTRAINTPOS.y)
-                        newConstrainedCoords.y = CONSTRAINTPOS.y;
-                    else if (mouseCoords.y >= CONSTRAINTPOS.y + CONSTRAINTSIZE.y)
-                        newConstrainedCoords.y = CONSTRAINTPOS.y + CONSTRAINTSIZE.y - 1.0;
+                wlr_cursor_warp_closest(g_pCompositor->m_sWLRCursor, g_pCompositor->m_sSeat.mouse->mouse, CONSTRAINTPOS.x + hint.x, CONSTRAINTPOS.y + hint.y);
 
-                    wlr_cursor_warp_closest(g_pCompositor->m_sWLRCursor, g_pCompositor->m_sSeat.mouse->mouse, newConstrainedCoords.x, newConstrainedCoords.y);
-
-                    mouseCoords = newConstrainedCoords;
-                }
+                return; // don't process anything else, the cursor is locked. The surface should not receive any further events.
+                        // these are usually FPS games. They will use the relative motion.
             } else {
-                if ((!CONSTRAINTWINDOW->m_bIsX11 && PMONITOR && CONSTRAINTWINDOW->m_iWorkspaceID == PMONITOR->activeWorkspace) || (CONSTRAINTWINDOW->m_bIsX11)) {
-                    g_pCompositor->m_sSeat.mouse->constraintActive = true;
+                // we restrict the cursor to the confined region
+                if (!pixman_region32_contains_point(&PCONSTRAINT->region, mouseCoords.x - CONSTRAINTPOS.x, mouseCoords.y - CONSTRAINTPOS.y, nullptr)) {
+                    if (g_pCompositor->m_sSeat.mouse->constraintActive) {
+                        wlr_cursor_warp_closest(g_pCompositor->m_sWLRCursor, NULL, mouseCoords.x, mouseCoords.y);
+                        mouseCoords = getMouseCoordsInternal();
+                    }
+                } else {
+                    if ((!CONSTRAINTWINDOW->m_bIsX11 && PMONITOR && CONSTRAINTWINDOW->m_iWorkspaceID == PMONITOR->activeWorkspace) || (CONSTRAINTWINDOW->m_bIsX11)) {
+                        g_pCompositor->m_sSeat.mouse->constraintActive = true;
+                    }
                 }
             }
 
@@ -123,15 +123,12 @@ void CInputManager::mouseMoveUnified(uint32_t time, bool refocus) {
     g_pLayoutManager->getCurrentLayout()->onMouseMove(getMouseCoordsInternal());
 
     if (PMONITOR && PMONITOR != g_pCompositor->m_pLastMonitor) {
-        g_pCompositor->m_pLastMonitor = PMONITOR;
+        g_pCompositor->setActiveMonitor(PMONITOR);
 
         // set active workspace and deactivate all other in wlr
         const auto ACTIVEWORKSPACE = g_pCompositor->getWorkspaceByID(PMONITOR->activeWorkspace);
         g_pCompositor->deactivateAllWLRWorkspaces(ACTIVEWORKSPACE->m_pWlrHandle);
         ACTIVEWORKSPACE->setActive(true);
-
-        // event
-        g_pEventManager->postEvent(SHyprIPCEvent{"focusedmon", PMONITOR->szName + "," + ACTIVEWORKSPACE->m_szName});
     }
 
     // overlay is above fullscreen
@@ -732,7 +729,7 @@ void CInputManager::setPointerConfigs() {
             }
 
             const auto SCROLLMETHOD = HASCONFIG ? g_pConfigManager->getDeviceString(devname, "scroll_method") : g_pConfigManager->getString("input:scroll_method");
-            if (SCROLLMETHOD == "" || SCROLLMETHOD == STRVAL_EMPTY) {
+            if (SCROLLMETHOD == "") {
                 libinput_device_config_scroll_set_method(LIBINPUTDEV, libinput_device_config_scroll_get_default_method(LIBINPUTDEV));
             } else if (SCROLLMETHOD == "no_scroll") {
                 libinput_device_config_scroll_set_method(LIBINPUTDEV, LIBINPUT_CONFIG_SCROLL_NO_SCROLL);
@@ -774,7 +771,7 @@ void CInputManager::setPointerConfigs() {
 
             const auto ACCELPROFILE = HASCONFIG ? g_pConfigManager->getDeviceString(devname, "accel_profile") : g_pConfigManager->getString("input:accel_profile");
 
-            if (ACCELPROFILE == "" || ACCELPROFILE == STRVAL_EMPTY) {
+            if (ACCELPROFILE == "") {
                 libinput_device_config_accel_set_profile(LIBINPUTDEV, libinput_device_config_accel_get_default_profile(LIBINPUTDEV));
             } else if (ACCELPROFILE == "adaptive") {
                 libinput_device_config_accel_set_profile(LIBINPUTDEV, LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE);
@@ -782,7 +779,11 @@ void CInputManager::setPointerConfigs() {
                 libinput_device_config_accel_set_profile(LIBINPUTDEV, LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT);
             } else {
                 Debug::log(WARN, "Unknown acceleration profile, falling back to default");
-            } 
+            }
+
+            const auto SCROLLBUTTON = HASCONFIG ? g_pConfigManager->getDeviceInt(devname, "scroll_button") : g_pConfigManager->getInt("input:scroll_button");
+
+            libinput_device_config_scroll_set_button(LIBINPUTDEV, SCROLLBUTTON == 0 ? libinput_device_config_scroll_get_default_button(LIBINPUTDEV) : SCROLLBUTTON);
 
             Debug::log(LOG, "Applied config to mouse %s, sens %.2f", m.name.c_str(), LIBINPUTSENS);
         }

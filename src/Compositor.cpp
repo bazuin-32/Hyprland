@@ -53,7 +53,7 @@ CCompositor::CCompositor() {
     wl_event_loop_add_signal(m_sWLEventLoop, SIGTERM, handleCritSignal, nullptr);
     //wl_event_loop_add_signal(m_sWLEventLoop, SIGINT, handleCritSignal, nullptr);
 
-    m_sWLRBackend = wlr_backend_autocreate(m_sWLDisplay);
+    m_sWLRBackend = wlr_backend_autocreate(m_sWLDisplay, &m_sWLRSession);
 
     if (!m_sWLRBackend) {
         Debug::log(CRIT, "m_sWLRBackend was NULL!");
@@ -132,7 +132,7 @@ CCompositor::CCompositor() {
 
     m_sWLRIdle = wlr_idle_create(m_sWLDisplay);
 
-    m_sWLRLayerShell = wlr_layer_shell_v1_create(m_sWLDisplay);
+    m_sWLRLayerShell = wlr_layer_shell_v1_create(m_sWLDisplay, 4);
 
     m_sWLRServerDecoMgr = wlr_server_decoration_manager_create(m_sWLDisplay);
     m_sWLRXDGDecoMgr = wlr_xdg_decoration_manager_v1_create(m_sWLDisplay);
@@ -172,8 +172,6 @@ CCompositor::CCompositor() {
     wlr_xdg_foreign_v2_create(m_sWLDisplay, m_sWLRForeignRegistry);
 
     m_sWLRPointerGestures = wlr_pointer_gestures_v1_create(m_sWLDisplay);
-
-    m_sWLRSession = wlr_backend_get_session(m_sWLRBackend);
 
     m_sWLRTextInputMgr = wlr_text_input_manager_v3_create(m_sWLDisplay);
 
@@ -888,7 +886,11 @@ wlr_surface* CCompositor::vectorToLayerSurface(const Vector2D& pos, std::vector<
         if ((*it)->fadingOut || !(*it)->layerSurface || ((*it)->layerSurface && !(*it)->layerSurface->mapped) || (*it)->alpha.fl() == 0.f)
             continue;
 
-        const auto SURFACEAT = wlr_layer_surface_v1_surface_at((*it)->layerSurface, pos.x - (*it)->geometry.x, pos.y - (*it)->geometry.y, &sCoords->x, &sCoords->y);
+        auto SURFACEAT = wlr_layer_surface_v1_surface_at((*it)->layerSurface, pos.x - (*it)->geometry.x, pos.y - (*it)->geometry.y, &sCoords->x, &sCoords->y);
+
+        if (!SURFACEAT && VECINRECT(pos, (*it)->geometry.x, (*it)->geometry.y, (*it)->geometry.x + (*it)->geometry.width, (*it)->geometry.y + (*it)->geometry.height)) {
+            SURFACEAT = (*it)->layerSurface->surface;
+        }
 
         if (SURFACEAT) {
             *ppLayerSurfaceFound = it->get();
@@ -1148,6 +1150,10 @@ CWindow* CCompositor::getWindowInDirection(CWindow* pWindow, char dir) {
 
     for (auto& w : m_vWindows) {
         if (w.get() == pWindow || !w->m_bIsMapped || w->isHidden() || w->m_bIsFloating || !isWorkspaceVisible(w->m_iWorkspaceID))
+            continue;
+
+        const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(w->m_iWorkspaceID);
+        if (PWORKSPACE->m_bHasFullscreenWindow && !w->m_bIsFullscreen && !w->m_bCreatedOverFullscreen)
             continue;
 
         const auto BWINDOWIDEALBB = w->getWindowIdealBoundingBoxIgnoreReserved();
@@ -1797,6 +1803,9 @@ void CCompositor::scheduleFrameForMonitor(CMonitor* pMonitor) {
     if ((m_sWLRSession && !m_sWLRSession->active) || !m_bSessionActive)
         return;
 
+    if (!pMonitor->m_bEnabled)
+        return;
+
     wlr_output_schedule_frame(pMonitor->output);
 }
 
@@ -1869,7 +1878,7 @@ void CCompositor::warpCursorTo(const Vector2D& pos) {
 
     const auto PMONITORNEW = getMonitorFromVector(pos);
     if (PMONITORNEW != m_pLastMonitor)
-        m_pLastMonitor = PMONITORNEW;
+        setActiveMonitor(PMONITORNEW);
 }
 
 SLayerSurface* CCompositor::getLayerSurfaceFromWlr(wlr_layer_surface_v1* pLS) {
@@ -1981,4 +1990,19 @@ CWorkspace* CCompositor::createNewWorkspace(const int& id, const int& monid, con
     PWORKSPACE->m_iMonitorID = monID;
 
     return PWORKSPACE;
+}
+
+void CCompositor::setActiveMonitor(CMonitor* pMonitor) {
+    if (m_pLastMonitor == pMonitor)
+        return;
+
+    if (!pMonitor) {
+        m_pLastMonitor = nullptr;
+        return;
+    }
+
+    const auto PWORKSPACE = getWorkspaceByID(pMonitor->activeWorkspace);
+
+    g_pEventManager->postEvent(SHyprIPCEvent{"focusedmon", pMonitor->szName + "," + PWORKSPACE->m_szName});
+    m_pLastMonitor = pMonitor;
 }

@@ -285,7 +285,7 @@ void CHyprMasterLayout::applyNodeDataToWindow(SMasterNodeData* pNode) {
     auto calcPos = PWINDOW->m_vPosition + Vector2D(*PBORDERSIZE, *PBORDERSIZE);
     auto calcSize = PWINDOW->m_vSize - Vector2D(2 * *PBORDERSIZE, 2 * *PBORDERSIZE);
 
-    if (*PNOGAPSWHENONLY && PWINDOW->m_iWorkspaceID != SPECIAL_WORKSPACE_ID && getNodesOnWorkspace(PWINDOW->m_iWorkspaceID) == 1) {
+    if (*PNOGAPSWHENONLY && PWINDOW->m_iWorkspaceID != SPECIAL_WORKSPACE_ID && (getNodesOnWorkspace(PWINDOW->m_iWorkspaceID) == 1 || (PWINDOW->m_bIsFullscreen && g_pCompositor->getWorkspaceByID(PWINDOW->m_iWorkspaceID)->m_efFullscreenMode == FULLSCREEN_MAXIMIZED))) {
         PWINDOW->m_vRealPosition = calcPos - Vector2D(*PBORDERSIZE, *PBORDERSIZE);
         PWINDOW->m_vRealSize = calcSize + Vector2D(2 * *PBORDERSIZE, 2 * *PBORDERSIZE);
 
@@ -366,7 +366,7 @@ void CHyprMasterLayout::resizeActiveWindow(const Vector2D& pixResize, CWindow* p
     double delta = pixResize.x / PMONITOR->vecSize.x;
 
     for (auto& n : m_lMasterNodesData) {
-        if (n.isMaster)
+        if (n.isMaster && n.workspaceID == PMONITOR->activeWorkspace)
             n.percMaster = std::clamp(n.percMaster + delta, 0.05, 0.95);
     }
 
@@ -590,8 +590,7 @@ std::any CHyprMasterLayout::layoutMessage(SLayoutMessageHeader header, std::stri
             return;
 
         g_pCompositor->focusWindow(PWINDOWTOCHANGETO);
-        Vector2D middle = PWINDOWTOCHANGETO->m_vRealPosition.goalv() + PWINDOWTOCHANGETO->m_vRealSize.goalv() / 2.f;
-        wlr_cursor_warp(g_pCompositor->m_sWLRCursor, nullptr, middle.x, middle.y);
+        g_pCompositor->warpCursorTo(PWINDOWTOCHANGETO->m_vRealPosition.goalv() + PWINDOWTOCHANGETO->m_vRealSize.goalv() / 2.f);
     };
 
     if (message == "swapwithmaster") {
@@ -605,12 +604,21 @@ std::any CHyprMasterLayout::layoutMessage(SLayoutMessageHeader header, std::stri
 
         const auto PMASTER = getMasterNodeOnWorkspace(PWINDOW->m_iWorkspaceID);
 
-        if (!PMASTER || PMASTER->pWindow == PWINDOW)
+        if (!PMASTER)
             return 0;
 
-        switchWindows(PWINDOW, PMASTER->pWindow);
-
-        switchToWindow(PWINDOW);
+        if (PMASTER->pWindow != PWINDOW) {
+            switchWindows(PWINDOW, PMASTER->pWindow);
+            switchToWindow(PWINDOW);
+        } else {
+            for (auto& n : m_lMasterNodesData) {
+                if (n.workspaceID == PMASTER->workspaceID && !n.isMaster) {
+                    switchWindows(n.pWindow, PMASTER->pWindow);
+                    switchToWindow(n.pWindow);
+                    break;
+                }
+            }
+        }
 
         return 0;
     } else if (message == "focusmaster") {
@@ -621,10 +629,19 @@ std::any CHyprMasterLayout::layoutMessage(SLayoutMessageHeader header, std::stri
 
         const auto PMASTER = getMasterNodeOnWorkspace(PWINDOW->m_iWorkspaceID);
 
-        if (!PMASTER || PMASTER->pWindow == PWINDOW)
+        if (!PMASTER)
             return 0;
 
-        switchToWindow(PMASTER->pWindow);
+        if (PMASTER->pWindow != PWINDOW)
+            switchToWindow(PMASTER->pWindow);
+        else {
+            for (auto& n : m_lMasterNodesData) {
+                if (n.workspaceID == PMASTER->workspaceID && !n.isMaster) {
+                    switchToWindow(n.pWindow);
+                    break;
+                }
+            }
+        }
 
         return 0;
     } else if (message == "cyclenext") {

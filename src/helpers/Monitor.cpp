@@ -3,8 +3,18 @@
 #include "../Compositor.hpp"
 
 void CMonitor::onConnect(bool noRule) {
-    if (m_bEnabled)
+    hyprListener_monitorDestroy.removeCallback();
+    hyprListener_monitorFrame.removeCallback();
+    hyprListener_monitorStateRequest.removeCallback();
+    hyprListener_monitorFrame.initCallback(&output->events.frame, &Events::listener_monitorFrame, this);
+    hyprListener_monitorDestroy.initCallback(&output->events.destroy, &Events::listener_monitorDestroy, this);
+    hyprListener_monitorStateRequest.initCallback(&output->events.request_state, &Events::listener_monitorStateRequest, this);
+
+    if (m_bEnabled) {
+        wlr_output_enable(output, 1);
+        wlr_output_commit(output);
         return;
+    }
 
     szName = output->name;
 
@@ -14,13 +24,9 @@ void CMonitor::onConnect(bool noRule) {
     // get monitor rule that matches
     SMonitorRule monitorRule = g_pConfigManager->getMonitorRuleFor(output->name, output->description ? output->description : "");
 
-    hyprListener_monitorFrame.initCallback(&output->events.frame, &Events::listener_monitorFrame, this);
-    hyprListener_monitorDestroy.initCallback(&output->events.destroy, &Events::listener_monitorDestroy, this);
-
     // if it's disabled, disable and ignore
     if (monitorRule.disabled) {
 
-        wlr_output_enable_adaptive_sync(output, 1);
         wlr_output_set_scale(output, 1);
         wlr_output_set_transform(output, WL_OUTPUT_TRANSFORM_NORMAL);
 
@@ -90,10 +96,8 @@ void CMonitor::onConnect(bool noRule) {
     }
 
     m_bEnabled = true;
-
-    wlr_output_set_scale(output, monitorRule.scale);
+    
     wlr_xcursor_manager_load(g_pCompositor->m_sWLRXCursorMgr, monitorRule.scale);
-    wlr_output_set_transform(output, WL_OUTPUT_TRANSFORM_NORMAL);  // TODO: support other transforms
 
     // create it in the arr
     vecPosition = monitorRule.offset;
@@ -126,15 +130,15 @@ void CMonitor::onConnect(bool noRule) {
     forceFullFrames = 3;  // force 3 full frames to make sure there is no blinking due to double-buffering.
     //
 
+    g_pEventManager->postEvent(SHyprIPCEvent{"monitoradded", szName});
+
     if (!g_pCompositor->m_pLastMonitor)  // set the last monitor if it isnt set yet
-        g_pCompositor->m_pLastMonitor = this;
+        g_pCompositor->setActiveMonitor(this);
 
     wlr_xcursor_manager_load(g_pCompositor->m_sWLRXCursorMgr, scale);
 
     g_pHyprRenderer->arrangeLayersForMonitor(ID);
     g_pLayoutManager->getCurrentLayout()->recalculateMonitor(ID);
-
-    g_pEventManager->postEvent(SHyprIPCEvent{"monitoradded", szName});
 
     // ensure VRR (will enable if necessary)
     g_pConfigManager->ensureVRR(this);
@@ -144,6 +148,8 @@ void CMonitor::onDisconnect() {
 
     if (!m_bEnabled || g_pCompositor->m_bIsShuttingDown)
         return;
+
+    Debug::log(LOG, "onDisconnect called for %s", output->name);
 
     // Cleanup everything. Move windows back, snap cursor, shit.
     CMonitor* BACKUPMON = nullptr;
@@ -155,7 +161,7 @@ void CMonitor::onDisconnect() {
     }
 
     if (g_pCompositor->m_pLastMonitor == this)
-        g_pCompositor->m_pLastMonitor = BACKUPMON;
+        g_pCompositor->setActiveMonitor(BACKUPMON);
 
     // remove mirror
     if (pMirrorOf) {
@@ -179,7 +185,7 @@ void CMonitor::onDisconnect() {
     if (!BACKUPMON) {
         Debug::log(WARN, "Unplugged last monitor, entering an unsafe state. Good luck my friend.");
 
-        hyprListener_monitorMode.removeCallback();
+        hyprListener_monitorStateRequest.removeCallback();
         hyprListener_monitorDestroy.removeCallback();
 
         g_pCompositor->m_bUnsafeState = true;
@@ -187,10 +193,8 @@ void CMonitor::onDisconnect() {
         return;
     }
 
-    const auto BACKUPWORKSPACE = BACKUPMON->activeWorkspace > 0 ? std::to_string(BACKUPMON->activeWorkspace) : "name:" + g_pCompositor->getWorkspaceByID(BACKUPMON->activeWorkspace)->m_szName;
-
     // snap cursor
-    wlr_cursor_warp(g_pCompositor->m_sWLRCursor, g_pCompositor->m_sSeat.mouse->mouse, BACKUPMON->vecPosition.x + BACKUPMON->vecTransformedSize.x / 2.f, BACKUPMON->vecPosition.y + BACKUPMON->vecTransformedSize.y / 2.f);
+    wlr_cursor_warp(g_pCompositor->m_sWLRCursor, nullptr, BACKUPMON->vecPosition.x + BACKUPMON->vecTransformedSize.x / 2.f, BACKUPMON->vecPosition.y + BACKUPMON->vecTransformedSize.y / 2.f);
 
     // move workspaces
     std::deque<CWorkspace*> wspToMove;
@@ -215,13 +219,13 @@ void CMonitor::onDisconnect() {
 
     wlr_output_commit(output);
 
-    g_pCompositor->m_vWorkspaces.erase(std::remove_if(g_pCompositor->m_vWorkspaces.begin(), g_pCompositor->m_vWorkspaces.end(), [&](std::unique_ptr<CWorkspace>& el) { return el->m_iMonitorID == ID; }));
+    std::erase_if(g_pCompositor->m_vWorkspaces, [&](std::unique_ptr<CWorkspace>& el) { return el->m_iMonitorID == ID; });
 
     Debug::log(LOG, "Removed monitor %s!", szName.c_str());
 
     g_pEventManager->postEvent(SHyprIPCEvent{"monitorremoved", szName});
 
-    g_pCompositor->m_vMonitors.erase(std::remove_if(g_pCompositor->m_vMonitors.begin(), g_pCompositor->m_vMonitors.end(), [&](std::shared_ptr<CMonitor>& el) { return el.get() == this; }));
+    std::erase_if(g_pCompositor->m_vMonitors, [&](std::shared_ptr<CMonitor>& el) { return el.get() == this; });
 }
 
 void CMonitor::addDamage(pixman_region32_t* rg) {
@@ -323,7 +327,7 @@ void CMonitor::setMirror(const std::string& mirrorOf) {
 
         setupDefaultWS(RULE);
 
-        wlr_output_layout_add(g_pCompositor->m_sWLROutputLayout, output, (int)vecPosition.x, (int)vecPosition.y);
+        g_pHyprRenderer->applyMonitorRule(this, (SMonitorRule*)&RULE, true); // will apply the offset and stuff
     } else {
         CMonitor* BACKUPMON = nullptr;
         for (auto& m : g_pCompositor->m_vMonitors) {
@@ -361,6 +365,6 @@ void CMonitor::setMirror(const std::string& mirrorOf) {
             g_pCompositor->m_vMonitors.erase(std::remove_if(g_pCompositor->m_vMonitors.begin(), g_pCompositor->m_vMonitors.end(), [&](const auto& other) { return other.get() == this; }));
         }
 
-        g_pCompositor->m_pLastMonitor = g_pCompositor->m_vMonitors.front().get();
+        g_pCompositor->setActiveMonitor(g_pCompositor->m_vMonitors.front().get());
     }
 }

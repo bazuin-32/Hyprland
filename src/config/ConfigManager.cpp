@@ -73,7 +73,7 @@ void CConfigManager::setDefaultVars() {
     configValues["decoration:blur_size"].intValue = 8;
     configValues["decoration:blur_passes"].intValue = 1;
     configValues["decoration:blur_ignore_opacity"].intValue = 0;
-    configValues["decoration:blur_new_optimizations"].intValue = 0;
+    configValues["decoration:blur_new_optimizations"].intValue = 1;
     configValues["decoration:active_opacity"].floatValue = 1;
     configValues["decoration:inactive_opacity"].floatValue = 1;
     configValues["decoration:fullscreen_opacity"].floatValue = 1;
@@ -106,7 +106,6 @@ void CConfigManager::setDefaultVars() {
     configValues["master:no_gaps_when_only"].intValue = 0;
 
     configValues["animations:enabled"].intValue = 1;
-    configValues["animations:use_resize_transitions"].intValue = 0;
     configValues["animations:speed"].floatValue = 7.f;
     configValues["animations:curve"].strValue = "default";
     configValues["animations:windows_style"].strValue = STRVAL_EMPTY;
@@ -142,6 +141,7 @@ void CConfigManager::setDefaultVars() {
     configValues["input:float_switch_override_focus"].intValue = 1;
     configValues["input:left_handed"].intValue = 0;
     configValues["input:scroll_method"].strValue = STRVAL_EMPTY;
+    configValues["input:scroll_button"].intValue = 0;
     configValues["input:touchpad:natural_scroll"].intValue = 0;
     configValues["input:touchpad:disable_while_typing"].intValue = 1;
     configValues["input:touchpad:clickfinger_behavior"].intValue = 0;
@@ -193,6 +193,7 @@ void CConfigManager::setDeviceDefaultVars(const std::string& dev) {
     cfgValues["drag_lock"].intValue = 0;
     cfgValues["left_handed"].intValue = 0;
     cfgValues["scroll_method"].strValue = STRVAL_EMPTY;
+    cfgValues["scroll_button"].intValue = 0;
     cfgValues["touch_transform"].intValue = 0;
     cfgValues["touch_output"].strValue = STRVAL_EMPTY;
     cfgValues["enabled"].intValue = 1; // only for mice / touchpads
@@ -1479,13 +1480,13 @@ void CConfigManager::performMonitorReload() {
     for (auto& m : g_pCompositor->m_vRealMonitors) {
         auto rule = getMonitorRuleFor(m->szName, m->output->description ? m->output->description : "");
 
-        // ensure mirror
-        m->setMirror(rule.mirrorOf);
-
         if (!g_pHyprRenderer->applyMonitorRule(m.get(), &rule)) {
             overAgain = true;
             break;
         }
+
+        // ensure mirror
+        m->setMirror(rule.mirrorOf);
 
         g_pHyprRenderer->arrangeLayersForMonitor(m->ID);
     }

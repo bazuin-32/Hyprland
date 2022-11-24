@@ -59,6 +59,13 @@ wlr_box CWindow::getWindowIdealBoundingBoxIgnoreReserved() {
     auto POS = m_vPosition;
     auto SIZE = m_vSize;
 
+    if (m_bIsFullscreen) {
+        POS = PMONITOR->vecPosition;
+        SIZE = PMONITOR->vecSize;
+
+        return wlr_box{(int)POS.x, (int)POS.y, (int)SIZE.x, (int)SIZE.y};
+    }
+
     if (DELTALESSTHAN(POS.y - PMONITOR->vecPosition.y, PMONITOR->vecReservedTopLeft.y, 1)) {
         POS.y = PMONITOR->vecPosition.y;
         SIZE.y += PMONITOR->vecReservedTopLeft.y;
@@ -265,6 +272,16 @@ void CWindow::onUnmap() {
 }
 
 void CWindow::onMap() {
+
+    // JIC, reset the callbacks. If any are set, we'll make sure they are cleared so we don't accidentally unset them. (In case a window got remapped)
+    m_vRealPosition.resetAllCallbacks();
+    m_vRealSize.resetAllCallbacks();
+    m_cRealBorderColor.resetAllCallbacks();
+    m_fActiveInactiveAlpha.resetAllCallbacks();
+    m_fAlpha.resetAllCallbacks();
+    m_cRealShadowColor.resetAllCallbacks();
+    m_fDimPercent.resetAllCallbacks();
+
     m_vRealPosition.registerVar();
     m_vRealSize.registerVar();
     m_cRealBorderColor.registerVar();
@@ -301,7 +318,8 @@ void CWindow::applyDynamicRule(const SWindowRule& r) {
     } else if (r.szRule == "noshadow") {
         m_sAdditionalConfigData.forceNoShadow = true;
     } else if (r.szRule == "opaque") {
-        m_sAdditionalConfigData.forceOpaque = true;
+        if (!m_sAdditionalConfigData.forceOpaqueOverriden)
+            m_sAdditionalConfigData.forceOpaque = true;
     } else if (r.szRule.find("rounding") == 0) {
         try {
             m_sAdditionalConfigData.rounding = std::stoi(r.szRule.substr(r.szRule.find_first_of(' ') + 1));
@@ -352,7 +370,8 @@ void CWindow::updateDynamicRules() {
     m_sAdditionalConfigData.forceNoBlur = false;
     m_sAdditionalConfigData.forceNoBorder = false;
     m_sAdditionalConfigData.forceNoShadow = false;
-    m_sAdditionalConfigData.forceOpaque = false;
+    if (!m_sAdditionalConfigData.forceOpaqueOverriden)
+        m_sAdditionalConfigData.forceOpaque = false;
     m_sAdditionalConfigData.forceNoAnims = false;
     m_sAdditionalConfigData.animationStyle = "";
     m_sAdditionalConfigData.rounding = -1;
