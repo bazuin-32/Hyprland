@@ -25,6 +25,8 @@ struct STouchData {
     Vector2D touchSurfaceOrigin;
 };
 
+class CKeybindManager;
+
 class CInputManager {
 public:
 
@@ -129,6 +131,9 @@ public:
     void            setCursorImageUntilUnset(std::string);
     void            unsetCursorImage();
 
+    std::string     deviceNameToInternalString(std::string);
+    std::string     getNameForNewDevice(std::string);
+
 private:
 
     bool            m_bCursorImageOverriden = false;
@@ -161,6 +166,8 @@ private:
 
     // swipe
     void            beginWorkspaceSwipe();
+
+    friend class CKeybindManager;
 };
 
 inline std::unique_ptr<CInputManager> g_pInputManager;

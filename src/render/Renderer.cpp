@@ -42,7 +42,7 @@ void renderSurface(struct wlr_surface* surface, int x, int y, void* data) {
             g_pHyprOpenGL->renderTexture(TEXTURE, &windowBox, RDATA->fadeAlpha * RDATA->alpha, rounding, true);
         } else {
             if (RDATA->blur)
-                g_pHyprOpenGL->renderTextureWithBlur(TEXTURE, &windowBox, RDATA->fadeAlpha * RDATA->alpha, surface, rounding);
+                g_pHyprOpenGL->renderTextureWithBlur(TEXTURE, &windowBox, RDATA->fadeAlpha * RDATA->alpha, surface, rounding, RDATA->blockBlurOptimization);
             else
                 g_pHyprOpenGL->renderTexture(TEXTURE, &windowBox, RDATA->fadeAlpha * RDATA->alpha, rounding, true);
         }
@@ -88,7 +88,7 @@ bool CHyprRenderer::shouldRenderWindow(CWindow* pWindow, CMonitor* pMonitor) {
     if (g_pCompositor->isWorkspaceVisible(pWindow->m_iWorkspaceID) && pWindow->m_bIsFloating /* tiled windows can't be multi-ws */)
         return !pWindow->m_bIsFullscreen; // Do not draw fullscreen windows on other monitors
 
-    if (pMonitor->specialWorkspaceOpen && pWindow->m_iWorkspaceID == SPECIAL_WORKSPACE_ID)
+    if (pMonitor->specialWorkspaceID && g_pCompositor->isWorkspaceSpecial(pWindow->m_iWorkspaceID))
         return true;
 
     return false;
@@ -111,7 +111,7 @@ bool CHyprRenderer::shouldRenderWindow(CWindow* pWindow) {
         if (PWORKSPACE && PWORKSPACE->m_iMonitorID == m->ID && (PWORKSPACE->m_vRenderOffset.isBeingAnimated() || PWORKSPACE->m_fAlpha.isBeingAnimated()))
             return true;
 
-        if (m->specialWorkspaceOpen && pWindow->m_iWorkspaceID == SPECIAL_WORKSPACE_ID)
+        if (m->specialWorkspaceID && g_pCompositor->isWorkspaceSpecial(pWindow->m_iWorkspaceID))
             return true;
     }
 
@@ -183,11 +183,11 @@ void CHyprRenderer::renderWorkspaceWithFullscreenWindow(CMonitor* pMonitor, CWor
     }
 
     // and then special windows
-    for (auto& w : g_pCompositor->m_vWindows) {
+    if (pMonitor->specialWorkspaceID) for (auto& w : g_pCompositor->m_vWindows) {
         if (!g_pCompositor->windowValidMapped(w.get()) && !w->m_bFadingOut)
             continue;
 
-        if (w->m_iWorkspaceID != SPECIAL_WORKSPACE_ID)
+        if (w->m_iWorkspaceID != pMonitor->specialWorkspaceID)
             continue;
 
         if (!shouldRenderWindow(w.get(), pMonitor))
@@ -300,14 +300,20 @@ void CHyprRenderer::renderWindow(CWindow* pWindow, CMonitor* pMonitor, timespec*
             float rounding = renderdata.dontRound ? 0 : renderdata.rounding == -1 ? *PROUNDING : renderdata.rounding;
             rounding *= pMonitor->scale;
 
-            auto col = g_pHyprOpenGL->m_pCurrentWindow->m_cRealBorderColor.col();
-            col.a *= renderdata.fadeAlpha * renderdata.alpha / 255.f;
+            auto grad = g_pHyprOpenGL->m_pCurrentWindow->m_cRealBorderColor;
+            const bool ANIMATED = g_pHyprOpenGL->m_pCurrentWindow->m_fBorderAnimationProgress.isBeingAnimated();
+            float a1 = renderdata.fadeAlpha * renderdata.alpha / 255.f * (ANIMATED ? g_pHyprOpenGL->m_pCurrentWindow->m_fBorderAnimationProgress.fl() : 1.f);
 
             wlr_box windowBox = {renderdata.x - pMonitor->vecPosition.x, renderdata.y - pMonitor->vecPosition.y, renderdata.w, renderdata.h};
 
             scaleBox(&windowBox, pMonitor->scale);
 
-            g_pHyprOpenGL->renderBorder(&windowBox, col, rounding);
+            g_pHyprOpenGL->renderBorder(&windowBox, grad, rounding, a1);
+
+            if (ANIMATED) {
+                float a2 = renderdata.fadeAlpha * renderdata.alpha / 255.f * (1.f - g_pHyprOpenGL->m_pCurrentWindow->m_fBorderAnimationProgress.fl());
+                g_pHyprOpenGL->renderBorder(&windowBox, g_pHyprOpenGL->m_pCurrentWindow->m_cRealBorderColorPrevious, rounding, a2);
+            }
         }
     }
 
@@ -343,6 +349,7 @@ void CHyprRenderer::renderLayer(SLayerSurface* pLayer, CMonitor* pMonitor, times
     renderdata.decorate = false;
     renderdata.w = pLayer->layerSurface->surface->current.width;
     renderdata.h = pLayer->layerSurface->surface->current.height;
+    renderdata.blockBlurOptimization = pLayer->layer == ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM || pLayer->layer == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
     wlr_surface_for_each_surface(pLayer->layerSurface->surface, renderSurface, &renderdata);
 
     renderdata.squishOversized = false;  // don't squish popups
@@ -398,7 +405,7 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
         if (w->m_bIsFloating)
             continue;  // floating are in the second pass
 
-        if (w->m_iWorkspaceID == SPECIAL_WORKSPACE_ID)
+        if (g_pCompositor->isWorkspaceSpecial(w->m_iWorkspaceID))
             continue;  // special are in the third pass
 
         if (!shouldRenderWindow(w.get(), PMONITOR))
@@ -425,7 +432,7 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
         if (w->m_bIsFloating)
             continue;  // floating are in the second pass
 
-        if (w->m_iWorkspaceID == SPECIAL_WORKSPACE_ID)
+        if (g_pCompositor->isWorkspaceSpecial(w->m_iWorkspaceID))
             continue; // special are in the third pass
 
         if (!shouldRenderWindow(w.get(), PMONITOR))
@@ -443,7 +450,7 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
         if (!w->m_bIsFloating)
             continue;
 
-        if (w->m_iWorkspaceID == SPECIAL_WORKSPACE_ID)
+        if (g_pCompositor->isWorkspaceSpecial(w->m_iWorkspaceID))
             continue;
 
         if (!shouldRenderWindow(w.get(), PMONITOR))
@@ -458,7 +465,7 @@ void CHyprRenderer::renderAllClientsForMonitor(const int& ID, timespec* time) {
         if (w->isHidden() && !w->m_bIsMapped && !w->m_bFadingOut)
             continue;
 
-        if (w->m_iWorkspaceID != SPECIAL_WORKSPACE_ID)
+        if (!g_pCompositor->isWorkspaceSpecial(w->m_iWorkspaceID))
             continue;
 
         if (!shouldRenderWindow(w.get(), PMONITOR))
@@ -561,7 +568,7 @@ bool CHyprRenderer::attemptDirectScanout(CMonitor* pMonitor) {
 
     const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(pMonitor->activeWorkspace);
 
-    if (!PWORKSPACE || !PWORKSPACE->m_bHasFullscreenWindow || g_pInputManager->m_sDrag.drag || g_pCompositor->m_sSeat.exclusiveClient)
+    if (!PWORKSPACE || !PWORKSPACE->m_bHasFullscreenWindow || g_pInputManager->m_sDrag.drag || g_pCompositor->m_sSeat.exclusiveClient || pMonitor->specialWorkspaceID)
         return false;
 
     const auto PCANDIDATE = g_pCompositor->getFullscreenWindowOnWorkspace(PWORKSPACE->m_iID);

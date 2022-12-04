@@ -26,7 +26,6 @@
         inherit system;
         overlays = [
           (_: prev: {
-            hwdata = prev.callPackage ./nix/hwdata.nix {};
             libdrm = prev.libdrm.overrideAttrs (old: rec {
               version = "2.4.114";
               src = prev.fetchurl {
@@ -58,7 +57,7 @@
       };
       hyprland = prev.callPackage ./nix/default.nix {
         stdenv = prev.gcc12Stdenv;
-        version = "0.17.0beta" + "+date=" + (mkDate (self.lastModifiedDate or "19700101")) + "_" + (self.shortRev or "dirty");
+        version = "0.18.0beta" + "+date=" + (mkDate (self.lastModifiedDate or "19700101")) + "_" + (self.shortRev or "dirty");
         wlroots = wlroots-hyprland;
       };
       hyprland-debug = hyprland.override {debug = true;};
@@ -78,6 +77,12 @@
     devShells = genSystems (system: {
       default = pkgsFor.${system}.mkShell.override {stdenv = pkgsFor.${system}.gcc12Stdenv;} {
         name = "hyprland-shell";
+        nativeBuildInputs = with pkgsFor.${system}; [
+          cmake
+        ];
+        buildInputs = [
+          self.packages.${system}.wlroots-hyprland
+        ];
         inputsFrom = [
           self.packages.${system}.wlroots-hyprland
           self.packages.${system}.hyprland
