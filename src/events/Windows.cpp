@@ -170,6 +170,8 @@ void Events::listener_mapWindow(void* owner, void* data) {
             requestsFullscreen = true;
         } else if (r.szRule == "windowdance") {
             PWINDOW->m_sAdditionalConfigData.windowDanceCompat = true;
+        } else if (r.szRule == "nomaxsize") {
+            PWINDOW->m_sAdditionalConfigData.noMaxSize = true;
         } else if (r.szRule == "forceinput") {
             PWINDOW->m_sAdditionalConfigData.forceAllowsInput = true;
         } else if (r.szRule == "pin") {
@@ -706,6 +708,11 @@ void Events::listener_destroyWindow(void* owner, void* data) {
     }
 
     PWINDOW->m_bReadyToDelete = true;
+    
+    if (!PWINDOW->m_bFadingOut) {
+        g_pCompositor->removeWindowFromVectorSafe(PWINDOW); // most likely X11 unmanaged or sumn
+        Debug::log(LOG, "Unmapped window %x removed instantly", PWINDOW);
+    }
 }
 
 void Events::listener_setTitleWindow(void* owner, void* data) {
