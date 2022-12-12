@@ -132,15 +132,12 @@ void IHyprLayout::onBeginDragWindow() {
 
     const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(DRAGGINGWINDOW->m_iWorkspaceID);
 
-    if (PWORKSPACE->m_bHasFullscreenWindow) {
-        Debug::log(LOG, "Rejecting drag on a fullscreen workspace.");
+    if (PWORKSPACE->m_bHasFullscreenWindow && (!DRAGGINGWINDOW->m_bCreatedOverFullscreen || !DRAGGINGWINDOW->m_bIsFloating)) {
+        Debug::log(LOG, "Rejecting drag on a fullscreen workspace. (window under fullscreen)");
         return;
     }
 
     g_pInputManager->setCursorImageUntilUnset("hand1");
-
-    DRAGGINGWINDOW->m_vRealPosition.setConfig(g_pConfigManager->getAnimationPropertyConfig("windowsMove"));
-    DRAGGINGWINDOW->m_vRealSize.setConfig(g_pConfigManager->getAnimationPropertyConfig("windowsMove"));
 
     DRAGGINGWINDOW->m_bDraggingTiled = false;
 
@@ -183,10 +180,10 @@ void IHyprLayout::onBeginDragWindow() {
 void IHyprLayout::onEndDragWindow() {
     const auto DRAGGINGWINDOW = g_pInputManager->currentlyDraggedWindow;
 
+    g_pInputManager->unsetCursorImage();
+
     if (!g_pCompositor->windowValidMapped(DRAGGINGWINDOW))
         return;
-
-    g_pInputManager->unsetCursorImage();
 
     if (DRAGGINGWINDOW->m_bDraggingTiled) {
         DRAGGINGWINDOW->m_bIsFloating = false;
@@ -204,9 +201,12 @@ void IHyprLayout::onMouseMove(const Vector2D& mousePos) {
 
     // Window invalid or drag begin size 0,0 meaning we rejected it.
     if (!g_pCompositor->windowValidMapped(DRAGGINGWINDOW) || m_vBeginDragSizeXY == Vector2D()) {
+        onEndDragWindow();
         g_pInputManager->currentlyDraggedWindow = nullptr;
         return;
     }
+
+    const auto SPECIAL = g_pCompositor->isWorkspaceSpecial(DRAGGINGWINDOW->m_iWorkspaceID);
 
     const auto DELTA = Vector2D(mousePos.x - m_vBeginDragXY.x, mousePos.y - m_vBeginDragXY.y);
     const auto TICKDELTA = Vector2D(mousePos.x - m_vLastDragXY.x, mousePos.y - m_vLastDragXY.y);
@@ -274,7 +274,7 @@ void IHyprLayout::onMouseMove(const Vector2D& mousePos) {
     // and check its monitor
     const auto PMONITOR = g_pCompositor->getMonitorFromVector(middle);
 
-    if (PMONITOR) {
+    if (PMONITOR && !SPECIAL) {
         DRAGGINGWINDOW->m_iMonitorID = PMONITOR->ID;
         DRAGGINGWINDOW->moveToWorkspace(PMONITOR->activeWorkspace);
 
@@ -299,6 +299,9 @@ void IHyprLayout::changeWindowFloatingMode(CWindow* pWindow) {
     pWindow->m_bPinned = false;
 
     const auto TILED = isWindowTiled(pWindow);
+
+    // event
+    g_pEventManager->postEvent(SHyprIPCEvent{ "changefloatingmode", getFormat("%x,%d", pWindow, (int)TILED) });
 
     if (!TILED) {
         const auto PNEWMON = g_pCompositor->getMonitorFromVector(pWindow->m_vRealPosition.vec() + pWindow->m_vRealSize.vec() / 2.f);

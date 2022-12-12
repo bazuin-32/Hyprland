@@ -20,7 +20,7 @@ void addViewCoords(void* pWindow, int* x, int* y) {
     *x += PWINDOW->m_vRealPosition.goalv().x;
     *y += PWINDOW->m_vRealPosition.goalv().y;
 
-    if (!PWINDOW->m_bIsX11) {
+    if (!PWINDOW->m_bIsX11 && PWINDOW->m_bIsMapped) {
         wlr_box geom;
         wlr_xdg_surface_get_geometry(PWINDOW->m_uSurface.xdg, &geom);
 
@@ -29,18 +29,12 @@ void addViewCoords(void* pWindow, int* x, int* y) {
     }
 }
 
-int setAnimToMove(void* data) {
-    const auto PWINDOW = (CWindow*)data;
-
+void setAnimToMove(void* data) {
     auto *const PANIMCFG = g_pConfigManager->getAnimationPropertyConfig("windowsMove");
 
-    if (!g_pCompositor->windowValidMapped(PWINDOW))
-        return 0;
+    CAnimatedVariable* animvar = (CAnimatedVariable*)data;
 
-    PWINDOW->m_vRealPosition.setConfig(PANIMCFG);
-    PWINDOW->m_vRealSize.setConfig(PANIMCFG);
-
-    return 0;
+    animvar->setConfig(PANIMCFG);
 }
 
 void Events::listener_mapWindow(void* owner, void* data) {
@@ -447,8 +441,8 @@ void Events::listener_mapWindow(void* owner, void* data) {
     PWINDOW->m_fAlpha.setValueAndWarp(0.f);
     PWINDOW->m_fAlpha = 255.f;
 
-    const auto TIMER = wl_event_loop_add_timer(g_pCompositor->m_sWLEventLoop, setAnimToMove, PWINDOW);
-    wl_event_source_timer_update(TIMER, PWINDOW->m_vRealPosition.getDurationLeftMs() + 5);
+    PWINDOW->m_vRealPosition.setCallbackOnEnd(setAnimToMove);
+    PWINDOW->m_vRealSize.setCallbackOnEnd(setAnimToMove);
 
     if (requestsFullscreen && !PWINDOW->m_bNoFullscreenRequest) {
         // fix fullscreen on requested (basically do a switcheroo)

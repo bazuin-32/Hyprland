@@ -95,7 +95,7 @@ public:
 
     ~CVarList() = default;
 
-    int size() const {
+    size_t size() const {
         return m_vArgs.size();
     }
 
@@ -141,6 +141,7 @@ public:
     SMonitorRule        getMonitorRuleFor(std::string, std::string displayName = "");
 
     CMonitor*           getBoundMonitorForWS(std::string);
+    std::string         getBoundMonitorStringForWS(std::string);
 
     std::vector<SWindowRule> getMatchingRules(CWindow*);
 

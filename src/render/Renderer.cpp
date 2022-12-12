@@ -89,7 +89,7 @@ bool CHyprRenderer::shouldRenderWindow(CWindow* pWindow, CMonitor* pMonitor) {
     if (g_pCompositor->isWorkspaceVisible(pWindow->m_iWorkspaceID) && pWindow->m_bIsFloating /* tiled windows can't be multi-ws */)
         return !pWindow->m_bIsFullscreen; // Do not draw fullscreen windows on other monitors
 
-    if (pMonitor->specialWorkspaceID && g_pCompositor->isWorkspaceSpecial(pWindow->m_iWorkspaceID))
+    if (pMonitor->specialWorkspaceID == pWindow->m_iWorkspaceID)
         return true;
 
     return false;
@@ -255,12 +255,6 @@ void CHyprRenderer::renderWindow(CWindow* pWindow, CMonitor* pMonitor, timespec*
         renderdata.fadeAlpha = 255.f;
     }
 
-    // apply window special data
-    if (pWindow->m_sSpecialRenderData.alphaInactive == -1)
-        renderdata.alpha *= pWindow->m_sSpecialRenderData.alpha;
-    else
-        renderdata.alpha *= pWindow == g_pCompositor->m_pLastWindow ? pWindow->m_sSpecialRenderData.alpha : pWindow->m_sSpecialRenderData.alphaInactive;
-
     // apply opaque
     if (pWindow->m_sAdditionalConfigData.forceOpaque)
         renderdata.alpha = 1.f;
@@ -269,7 +263,7 @@ void CHyprRenderer::renderWindow(CWindow* pWindow, CMonitor* pMonitor, timespec*
 
     // clip box for animated offsets
     Vector2D offset;
-    if (!ignorePosition && pWindow->m_bIsFloating) {
+    if (!ignorePosition && pWindow->m_bIsFloating && !pWindow->m_bPinned) {
         if (PWORKSPACE->m_vRenderOffset.vec().x != 0) {
             const auto PWSMON = g_pCompositor->getMonitorFromID(PWORKSPACE->m_iMonitorID);
             const auto PROGRESS = PWORKSPACE->m_vRenderOffset.vec().x / PWSMON->vecSize.x;

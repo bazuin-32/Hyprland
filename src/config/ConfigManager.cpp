@@ -109,6 +109,8 @@ void CConfigManager::setDefaultVars() {
     configValues["master:new_is_master"].intValue = 1;
     configValues["master:new_on_top"].intValue = 0;
     configValues["master:no_gaps_when_only"].intValue = 0;
+    configValues["master:orientation"].strValue = "left";
+    configValues["master:inherit_fullscreen"].intValue = 1;
 
     configValues["animations:enabled"].intValue = 1;
     configValues["animations:speed"].floatValue = 7.f;
@@ -1686,6 +1688,18 @@ CMonitor* CConfigManager::getBoundMonitorForWS(std::string wsname) {
     }
 
     return nullptr;
+}
+
+std::string CConfigManager::getBoundMonitorStringForWS(std::string wsname) {
+    for (auto& [ws, mon] : boundWorkspaces) {
+        const auto WSNAME = ws.find("name:") == 0 ? ws.substr(5) : ws;
+
+        if (WSNAME == wsname) {
+            return mon;
+        }
+    }
+
+    return "";
 }
 
 void CConfigManager::addExecRule(SExecRequestedRule rule) {

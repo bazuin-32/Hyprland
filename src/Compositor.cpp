@@ -366,7 +366,7 @@ void CCompositor::startCompositor() {
     if (m_sWLRSession /* Session-less Hyprland usually means a nest, don't update the env in that case */ && fork() == 0)
         execl("/bin/sh", "/bin/sh", "-c", "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE", nullptr);
 
-    Debug::log(LOG, "Running on WAYLAND_DISPLAY: %s", m_szWLDisplaySocket);
+    Debug::log(LOG, "Running on WAYLAND_DISPLAY: %s", m_szWLDisplaySocket.c_str());
 
     if (!wlr_backend_start(m_sWLRBackend)) {
         Debug::log(CRIT, "Backend did not start!");
@@ -911,6 +911,9 @@ wlr_surface* CCompositor::vectorToLayerSurface(const Vector2D& pos, std::vector<
 
 CWindow* CCompositor::getWindowFromSurface(wlr_surface* pSurface) {
     for (auto& w : m_vWindows) {
+        if (!w->m_bIsMapped || w->m_bFadingOut || !w->m_bMappedX11)
+            continue;
+
         if (g_pXWaylandManager->getWindowSurface(w.get()) == pSurface)
             return w.get();
     }
@@ -922,6 +925,23 @@ CWindow* CCompositor::getWindowFromHandle(uint32_t handle) {
     for (auto& w : m_vWindows) {
         if ((uint32_t)(((uint64_t)w.get()) & 0xFFFFFFFF) == handle) {
             return w.get();
+        }
+    }
+
+    return nullptr;
+}
+
+CWindow* CCompositor::getWindowFromZWLRHandle(wl_resource* handle) {
+    for (auto& w : m_vWindows) {
+        if (!w->m_bIsMapped || w->isHidden() || !w->m_phForeignToplevel)
+            continue;
+
+        wl_resource* current;
+
+        wl_list_for_each(current, &w->m_phForeignToplevel->resources, link) {
+            if (current == handle) {
+                return w.get();
+            }
         }
     }
 
@@ -1455,22 +1475,14 @@ void CCompositor::updateWindowAnimatedDecorationValues(CWindow* pWindow) {
 
 
     // opacity
-    if (pWindow->m_bIsFullscreen) {
-        const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(pWindow->m_iWorkspaceID);
-
-        if (PWORKSPACE->m_efFullscreenMode == FULLSCREEN_FULL)
-            pWindow->m_fActiveInactiveAlpha = *PFULLSCREENALPHA;
-        else {
-            if (pWindow == m_pLastWindow)
-                pWindow->m_fActiveInactiveAlpha = pWindow->m_sSpecialRenderData.alpha * *PACTIVEALPHA;
-            else
-                pWindow->m_fActiveInactiveAlpha = pWindow->m_sSpecialRenderData.alphaInactive != -1 ? pWindow->m_sSpecialRenderData.alphaInactive * *PINACTIVEALPHA : *PINACTIVEALPHA;
-        }
+    const auto PWORKSPACE = g_pCompositor->getWorkspaceByID(pWindow->m_iWorkspaceID);
+    if (pWindow->m_bIsFullscreen && PWORKSPACE->m_efFullscreenMode == FULLSCREEN_FULL) {
+        pWindow->m_fActiveInactiveAlpha = *PFULLSCREENALPHA;
     } else {
         if (pWindow == m_pLastWindow)
-            pWindow->m_fActiveInactiveAlpha = pWindow->m_sSpecialRenderData.alpha * *PACTIVEALPHA;
+            pWindow->m_fActiveInactiveAlpha = pWindow->m_sSpecialRenderData.alphaOverride ? pWindow->m_sSpecialRenderData.alpha : pWindow->m_sSpecialRenderData.alpha * *PACTIVEALPHA;
         else
-            pWindow->m_fActiveInactiveAlpha = pWindow->m_sSpecialRenderData.alphaInactive != -1 ? pWindow->m_sSpecialRenderData.alphaInactive * *PINACTIVEALPHA : *PINACTIVEALPHA;
+            pWindow->m_fActiveInactiveAlpha = pWindow->m_sSpecialRenderData.alphaInactive != -1 ? (pWindow->m_sSpecialRenderData.alphaInactiveOverride ? pWindow->m_sSpecialRenderData.alphaInactive : pWindow->m_sSpecialRenderData.alphaInactive * *PINACTIVEALPHA) : *PINACTIVEALPHA;
     }
 
     // dim
@@ -1581,7 +1593,8 @@ CMonitor* CCompositor::getMonitorFromString(const std::string& name) {
             return nullptr;
         }
 
-        int offsetLeft = std::stoi(OFFSET) % m_vMonitors.size(); // no need to cycle more
+        int offsetLeft = std::stoi(OFFSET);
+        offsetLeft = offsetLeft < 0 ? -((-offsetLeft) % m_vMonitors.size()) : offsetLeft % m_vMonitors.size();
 
         int currentPlace = 0;
         for (int i = 0; i < (int)m_vMonitors.size(); i++) {
